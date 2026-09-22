@@ -1,24 +1,22 @@
+from functools import lru_cache
+
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 
-# Embedding modelimizi yüklüyoruz
-model = SentenceTransformer("all-MiniLM-L6-v2")
+@lru_cache(maxsize=2)
+def get_embedding_model(model_name="all-MiniLM-L6-v2"):
+    return SentenceTransformer(model_name)
 
 
-# Örnek metinler
-documents = [
-    "Transformers use self-attention mechanisms.",
-    "Self-attention is an important part of Transformer architecture.",
-    "CNNs are commonly used for image classification.",
-    "Random Forest is an ensemble learning algorithm.",
-    "Python is a popular programming language."
-]
+def embed_texts(texts, model_name="all-MiniLM-L6-v2"):
+    if not texts:
+        return np.empty((0, 0), dtype="float32")
 
-
-# Metinleri embedding vektörlerine dönüştürüyoruz
-embeddings = model.encode(documents)
-
-
-print("Embedding shape:", embeddings.shape)
-print("\nİlk dokümanın embedding'i:")
-print(embeddings[0])
+    model = get_embedding_model(model_name)
+    embeddings = model.encode(
+        texts,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+    return np.asarray(embeddings, dtype="float32")

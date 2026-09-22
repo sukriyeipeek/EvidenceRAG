@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EvidenceRAG | Kanıta Dayalı Asistan</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <a class="brand" href="/">
+                <span class="brand-mark">E</span>
+                <span>
+                    <strong>EvidenceRAG</strong>
+                    <small>Kanıta dayalı doküman asistanı</small>
+                </span>
+            </a>
+            <div class="connection-status">
+                <span class="status-dot" id="healthDot"></span>
+                <span id="healthText">Backend kontrol ediliyor</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero">
+                <div>
+                    <p class="eyebrow">DOCUMENT INTELLIGENCE</p>
+                    <h1>Dokümanlarını yükle,<br><span>kanıta dayalı</span> cevaplar al.</h1>
+                    <p class="hero-copy">
+                        EvidenceRAG yalnızca yüklediğin dokümanlardan ilgili parçaları bulur,
+                        cevabı bu kanıtlarla oluşturur ve kaynakları görünür şekilde gösterir.
+                    </p>
+                </div>
+                <div class="hero-orbit" aria-hidden="true">
+                    <div class="orbit orbit-one"></div>
+                    <div class="orbit orbit-two"></div>
+                    <div class="orbit-core">E</div>
+                </div>
+            </section>
+
+            <section class="workspace-grid">
+                <div class="panel upload-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="section-kicker">01 / INDEX</p>
+                            <h2>Doküman ekle</h2>
+                        </div>
+                        <span class="panel-icon">↑</span>
+                    </div>
+                    <p class="panel-description">PDF, TXT veya Markdown dosyanı yükleyerek arama alanına ekle.</p>
+
+                    <label class="dropzone" for="documentFile" id="dropzone">
+                        <span class="upload-icon">↥</span>
+                        <span class="dropzone-title" id="fileName">Dosyanı buraya bırak</span>
+                        <span class="dropzone-hint">veya seçmek için tıkla · PDF, TXT, MD</span>
+                        <input id="documentFile" type="file" accept=".pdf,.txt,.md">
+                    </label>
+
+                    <button class="primary-button full-width" id="uploadButton" type="button">
+                        <span>Dokümanı indexle</span>
+                        <span class="button-arrow">→</span>
+                    </button>
+                    <div class="feedback" id="uploadFeedback" role="status"></div>
+
+                    <div class="index-summary">
+                        <div>
+                            <span class="summary-label">Indexlenen chunk</span>
+                            <strong id="chunkCount">0</strong>
+                        </div>
+                        <div class="summary-divider"></div>
+                        <div>
+                            <span class="summary-label">Format</span>
+                            <strong>PDF / TXT / MD</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel question-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="section-kicker">02 / ASK</p>
+                            <h2>Dokümanlarına sor</h2>
+                        </div>
+                        <span class="panel-icon">⌕</span>
+                    </div>
+                    <p class="panel-description">Sorunu yaz. Sistem yalnızca ilgili kanıt parçalarını kullanarak yanıt üretsin.</p>
+
+                    <label class="input-label" for="question">Sorun</label>
+                    <textarea id="question" rows="6" placeholder="Örn. Bu dokümanın ana sonucu nedir?"></textarea>
+                    <div class="question-footer">
+                        <span class="shortcut-hint">Ctrl + Enter ile gönder</span>
+                        <button class="primary-button" id="askButton" type="button">
+                            <span>Cevap oluştur</span>
+                            <span class="button-arrow">→</span>
+                        </button>
+                    </div>
+                    <div class="feedback" id="askFeedback" role="status"></div>
+                </div>
+            </section>
+
+            <section class="results-section">
+                <div class="results-heading">
+                    <div>
+                        <p class="section-kicker">03 / EVIDENCE</p>
+                        <h2>Yanıt ve kaynaklar</h2>
+                    </div>
+                    <span class="result-badge" id="sourceCount">Henüz sonuç yok</span>
+                </div>
+
+                <div class="answer-card empty-state" id="answerCard">
+                    <div class="empty-icon">✦</div>
+                    <div>
+                        <h3>Henüz bir soru sorulmadı</h3>
+                        <p>Dokümanını indexledikten sonra yukarıdaki alandan bir soru sorabilirsin.</p>
+                    </div>
+                </div>
+
+                <div class="sources-wrapper" id="sourcesWrapper" hidden>
+                    <div class="sources-heading">
+                        <h3>Dayanılan kaynaklar</h3>
+                        <span>Similarity skoruna göre sıralanır</span>
+                    </div>
+                    <div class="sources-grid" id="sourcesList"></div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <span>EvidenceRAG</span>
+            <span>Only answer using the supplied evidence.</span>
+        </footer>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

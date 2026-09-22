@@ -1,148 +1,139 @@
 # EvidenceRAG
 
-**Evidence-grounded Retrieval-Augmented Generation (RAG) system**
+EvidenceRAG, kullanıcının yüklediği dokümanlardan kanıt parçaları getirerek soruları yanıtlayan basit bir Retrieval-Augmented Generation (RAG) uygulamasıdır. Yanıt üretirken yalnızca retrieval sonucundaki parçalar kullanılır ve kullanılan chunk kaynakları yanıtla birlikte döndürülür.
 
-EvidenceRAG is an AI research assistant designed to generate answers grounded in retrieved evidence from user-provided documents.
-
-The project focuses on combining **semantic search, RAG, source citation, claim extraction, and evidence verification** to improve the traceability and reliability of LLM-generated answers.
-
-## 🎯 Project Goal
-
-Large Language Models can generate fluent answers but may produce unsupported or incorrect information.
-
-EvidenceRAG aims to address this problem by retrieving relevant evidence from documents and connecting generated claims to their supporting sources.
-
-The main idea is:
+## Nasıl çalışır?
 
 ```text
-Documents
+PDF / TXT / MD
     ↓
-Text Extraction
+Metin çıkarma ve temizleme
     ↓
-Chunking
+Overlap'li chunk'lar
     ↓
-Embeddings
+Sentence Transformers embedding
     ↓
-Vector Search
+FAISS cosine similarity araması
     ↓
-Relevant Evidence
+Relevance threshold ile kanıt seçimi
     ↓
-LLM
+Evidence-only prompt
     ↓
-Generated Answer
+Yerel Transformers LLM
     ↓
-Claim Extraction
-    ↓
-Evidence Verification
+Yanıt ve kaynak chunk'ları
 ```
 
-## 🚧 Project Status
+PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Vector store şu an süreç belleğindedir; uygulama yeniden başlatıldığında dokümanlar yeniden yüklenmelidir.
 
-**Early Development**
+## Kurulum
 
-Currently working on:
+```bash
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-* Understanding embeddings
-* Semantic search
-* FAISS-based vector retrieval
+İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir. Model adlarını veya RAG ayarlarını environment variable ile değiştirebilirsiniz:
 
-## 🛠️ Planned Features
+| Değişken | Varsayılan | Açıklama |
+| --- | --- | --- |
+| `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Sentence Transformers embedding modeli |
+| `LLM_MODEL_NAME` | `google/flan-t5-small` | `text2text-generation` görevini destekleyen yerel model |
+| `CHUNK_SIZE` | `800` | Chunk karakter uzunluğu |
+| `CHUNK_OVERLAP` | `100` | Ardışık chunk'lar arasındaki karakter overlap'i |
+| `TOP_K` | `5` | Retrieval sonucundaki maksimum chunk sayısı |
+| `RELEVANCE_THRESHOLD` | `0.35` | Normalize embedding'lerde cosine similarity alt sınırı |
+| `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
 
-* [ ] Document ingestion
-* [ ] PDF text extraction
-* [ ] Text chunking
-* [ ] Semantic embeddings
-* [ ] FAISS vector search
-* [ ] Retrieval-Augmented Generation (RAG)
-* [ ] Source citation
-* [ ] Claim extraction
-* [ ] Evidence verification
-* [ ] "Insufficient evidence" detection
-* [ ] Retrieval evaluation
-* [ ] Answer faithfulness evaluation
-* [ ] FastAPI backend
-* [ ] User interface
-* [ ] Dockerization
+`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Değer, kanıtın yeterince benzer olmadığını düşündüğünüz durumda environment variable ile açıkça değiştirilebilir.
 
-## 🧰 Tech Stack
+## Çalıştırma
 
-* Python
-* Sentence Transformers
-* FAISS
-* PyTorch
-* Hugging Face Transformers
-* FastAPI
-* Docker
+```bash
+uvicorn main:app --reload
+```
 
-## 📁 Project Structure
+Sunucu başladıktan sonra web arayüzünü `http://127.0.0.1:8000/` adresinden, Swagger API ekranını ise `http://127.0.0.1:8000/docs` adresinden açabilirsiniz. Web arayüzü doküman yükleme, soru sorma, cevap gösterme ve kaynakları okunabilir kartlar halinde listeleme işlemlerini içerir.
+
+### Sağlık kontrolü
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### Doküman indexleme
+
+```bash
+curl -X POST http://127.0.0.1:8000/documents \
+  -F "file=@./data/example.pdf"
+```
+
+Desteklenen formatlar: `.pdf`, `.txt`, `.md`.
+
+### Soru sorma
+
+```bash
+curl -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Bu dokümanın ana sonucu nedir?"}'
+```
+
+Yanıt biçimi:
+
+```json
+{
+  "answer": "... [document-id-0]",
+  "sources": [
+    {
+      "filename": "example.pdf",
+      "document_id": "document-id",
+      "page": 1,
+      "source": "example.pdf",
+      "chunk_id": "document-id-0",
+      "score": 0.72
+    }
+  ]
+}
+```
+
+Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt bulunamadığını açıkça bildirir.
+
+## Testler
+
+```bash
+pytest -q
+```
+
+Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt kısıtlarını, kaynak dönüşünü ve yetersiz kanıt davranışını kontrol eder. Gerçek LLM çağrısı yapılmaz; generation fonksiyonu testte sahte bir fonksiyonla değiştirilir.
+
+## Proje yapısı
 
 ```text
-evidenceRAG/
-│
-├── app/
-│   ├── rag/
-│   ├── models/
-│   ├── evaluation/
-│   └── utils/
-│
-├── data/
-│   ├── raw/
-│   └── processed/
-│
-├── experiments/
-├── tests/
-├── notebooks/
-│
-├── main.py
-├── requirements.txt
-└── README.md
+app/
+  rag/
+    chunking.py
+    config.py
+    document_loader.py
+    embedding.py
+    generation.py
+    pipeline.py
+    prompt.py
+    retrieval.py
+    vector_store.py
+static/
+  app.js
+  index.html
+  styles.css
+main.py
+tests/
+requirements.txt
 ```
 
-## 🗺️ Roadmap
+## Bilinen sınırlamalar
 
-### Phase 1 — Semantic Retrieval
-
-* Embedding generation
-* Vector representation
-* Similarity search
-* FAISS integration
-
-### Phase 2 — RAG
-
-* PDF processing
-* Chunking
-* Retrieval
-* LLM-based answer generation
-
-### Phase 3 — Evidence & Citations
-
-* Document metadata
-* Source tracking
-* Citation generation
-
-### Phase 4 — Claim Verification
-
-* Claim extraction
-* Evidence retrieval
-* Claim-evidence matching
-* Unsupported claim detection
-
-### Phase 5 — Evaluation
-
-* Precision@K
-* Recall@K
-* MRR
-* Answer relevance
-* Faithfulness
-* Citation correctness
-
-### Phase 6 — Application
-
-* FastAPI
-* User interface
-* Docker
-* Deployment
-
-## 📌 Objective
-
-The goal of EvidenceRAG is not only to generate answers, but to make the relationship between **answers, claims, and supporting evidence** explicit and measurable.
+- Vector store kalıcı değildir ve tek proses belleğinde tutulur.
+- PDF metin çıkarma, taranmış görüntüler için OCR yapmaz.
+- Şu anda yalnızca PDF, TXT ve Markdown desteklenir.
+- LLM yanıtının verilen kanıta dayalı olması prompt ve retrieval threshold ile teşvik edilir; ayrıca claim-level doğrulama katmanı henüz yoktur.
