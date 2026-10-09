@@ -20,3 +20,6 @@ Thumbs.db
 
 # Persisted vector index
 data/index/
+
+# Evaluation reports
+experiments/results/
