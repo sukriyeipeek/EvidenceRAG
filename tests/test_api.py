@@ -62,3 +62,30 @@ def test_upload_rejects_files_over_size_limit(client):
 def test_ask_rejects_empty_question(client):
     response = client.post("/ask", json={"question": "   "})
     assert response.status_code == 400
+
+
+def upload(client, filename="rapor.txt", text="Etkinlik 2024'te gerçekleşti."):
+    return client.post("/documents", files={"file": (filename, text.encode("utf-8"), "text/plain")})
+
+
+def test_documents_can_be_listed_and_deleted(client):
+    document_id = upload(client).json()["document_id"]
+
+    listed = client.get("/documents").json()["documents"]
+    assert [(d["document_id"], d["filename"], d["chunks"]) for d in listed] == [(document_id, "rapor.txt", 1)]
+
+    deleted = client.delete(f"/documents/{document_id}")
+    assert deleted.status_code == 200
+    assert client.get("/documents").json() == {"documents": []}
+    assert client.get("/health").json()["indexed_chunks"] == 0
+    assert client.delete(f"/documents/{document_id}").status_code == 404
+
+
+def test_uploading_the_same_content_twice_is_rejected(client):
+    assert upload(client, "rapor.txt").status_code == 200
+
+    duplicate = upload(client, "rapor-kopya.txt")
+
+    assert duplicate.status_code == 409
+    assert "rapor.txt" in duplicate.json()["detail"]
+    assert len(client.get("/documents").json()["documents"]) == 1

@@ -379,6 +379,92 @@ button {
     background: var(--line);
 }
 
+.documents-section {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+}
+
+.documents-heading {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.documents-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 230px;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.documents-empty {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.document-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fbfdfd;
+}
+
+.document-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.document-name {
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.document-meta {
+    color: var(--muted);
+    font-family: "DM Mono", monospace;
+    font-size: 10px;
+}
+
+.document-delete {
+    display: grid;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.document-delete:hover,
+.document-delete:focus-visible {
+    color: #bd5a46;
+    background: #fbe9e4;
+}
+
+.document-delete:disabled {
+    cursor: wait;
+    opacity: 0.5;
+}
+
 .input-label {
     display: block;
     margin-bottom: 9px;

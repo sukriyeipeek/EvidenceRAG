@@ -1,3 +1,5 @@
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .chunking import chunk_documents
@@ -7,7 +9,7 @@ from .embedding import embed_texts
 from .generation import generate_answer
 from .prompt import NO_EVIDENCE_MARKER, build_messages
 from .retrieval import retrieve
-from .vector_store import VectorStore
+from .vector_store import DuplicateDocumentError, VectorStore
 
 
 INSUFFICIENT_EVIDENCE = (
@@ -21,13 +23,22 @@ class RAGPipeline:
         settings=None,
         embedding_function=embed_texts,
         generation_function=generate_answer,
+        vector_store=None,
     ):
         self.settings = settings or Settings()
         self.embedding_function = embedding_function
         self.generation_function = generation_function
-        self.vector_store = VectorStore()
+        self.vector_store = vector_store or VectorStore()
 
     def index_file(self, path, filename=None, source=None):
+        filename = filename or Path(path).name
+        sha256 = _file_sha256(path)
+        # Checked before embedding so re-uploads don't pay for it; the store checks
+        # again under its lock in case the same file is uploaded twice at once.
+        existing = self.vector_store.find_document_by_hash(sha256)
+        if existing:
+            raise DuplicateDocumentError(existing)
+
         pages = load_document(
             path,
             filename=filename,
@@ -43,12 +54,26 @@ class RAGPipeline:
             [prefix + chunk["text"] for chunk in chunks],
             self.settings.embedding_model_name,
         )
-        self.vector_store.add(chunks, embeddings)
-        return {
+        document = {
             "document_id": chunks[0]["metadata"]["document_id"],
-            "filename": filename or Path(path).name,
+            "filename": filename,
+            "sha256": sha256,
+            "pages": len({chunk["metadata"]["page"] for chunk in chunks} - {None}) or None,
+            "chunks": len(chunks),
+            "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        self.vector_store.add_document(document, chunks, embeddings)
+        return {
+            "document_id": document["document_id"],
+            "filename": filename,
             "chunks_indexed": len(chunks),
         }
+
+    def list_documents(self):
+        return self.vector_store.list_documents()
+
+    def delete_document(self, document_id):
+        return self.vector_store.delete_document(document_id)
 
     def ask(self, question):
         evidence = retrieve(
@@ -90,3 +115,11 @@ def _sources_from(evidence):
         }
         for index, item in enumerate(evidence, start=1)
     ]
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

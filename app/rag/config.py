@@ -46,3 +46,13 @@ class Settings:
     relevance_threshold: float = field(default_factory=_float_env("RELEVANCE_THRESHOLD", 0.80))
     max_new_tokens: int = field(default_factory=_int_env("MAX_NEW_TOKENS", 256))
     max_upload_mb: int = field(default_factory=_int_env("MAX_UPLOAD_MB", 20))
+    # Relative paths are resolved against the project root.
+    index_dir: str = field(default_factory=_str_env("INDEX_DIR", "data/index"))
+
+    def embedding_signature(self):
+        """Settings that determine the stored vectors; changing any of them needs a re-index."""
+        return {
+            "embedding_model_name": self.embedding_model_name,
+            "embedding_query_prefix": self.embedding_query_prefix,
+            "embedding_passage_prefix": self.embedding_passage_prefix,
+        }
