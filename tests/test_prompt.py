@@ -1,8 +1,8 @@
-from app.rag.prompt import build_prompt
+from app.rag.prompt import build_messages
 
 
-def test_prompt_requires_evidence_only_answers_and_citations():
-    prompt = build_prompt(
+def test_messages_require_evidence_only_answers_and_citations():
+    system, user = build_messages(
         "What happened?",
         [
             {
@@ -14,8 +14,16 @@ def test_prompt_requires_evidence_only_answers_and_citations():
         ],
     )
 
-    assert "Only answer using the supplied evidence" in prompt
-    assert "not enough evidence" in prompt
-    assert "Kanıt 1" in prompt
-    assert "Do not show internal chunk IDs" in prompt
-    assert "report.pdf" in prompt
+    assert system["role"] == "system"
+    assert "Only answer using the supplied evidence" in system["content"]
+    assert "reply with only NO_EVIDENCE" in system["content"]
+    assert "Do not show internal chunk IDs" in system["content"]
+
+    assert user["role"] == "user"
+    assert "Kanıt 1" in user["content"]
+    assert "report.pdf" in user["content"]
+    assert "page=2" in user["content"]
+    assert "The event happened in 2024." in user["content"]
+    assert "Question: What happened?" in user["content"]
+    assert user["content"].endswith("Answer in the same language as the question.")
+    assert "doc-1-0" not in user["content"]

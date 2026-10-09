@@ -5,11 +5,11 @@ from sentence_transformers import SentenceTransformer
 
 
 @lru_cache(maxsize=2)
-def get_embedding_model(model_name="all-MiniLM-L6-v2"):
+def get_embedding_model(model_name="intfloat/multilingual-e5-small"):
     return SentenceTransformer(model_name)
 
 
-def embed_texts(texts, model_name="all-MiniLM-L6-v2"):
+def embed_texts(texts, model_name="intfloat/multilingual-e5-small"):
     if not texts:
         return np.empty((0, 0), dtype="float32")
 

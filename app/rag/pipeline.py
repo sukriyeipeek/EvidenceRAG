@@ -5,13 +5,13 @@ from .config import Settings
 from .document_loader import load_document
 from .embedding import embed_texts
 from .generation import generate_answer
-from .prompt import build_prompt
+from .prompt import NO_EVIDENCE_MARKER, build_messages
 from .retrieval import retrieve
 from .vector_store import VectorStore
 
 
 INSUFFICIENT_EVIDENCE = (
-    "I couldn't find enough evidence in the indexed documents to answer this question."
+    "Yüklenen dokümanlarda bu soruyu yanıtlamak için yeterli kanıt bulunamadı."
 )
 
 
@@ -38,8 +38,9 @@ class RAGPipeline:
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
         )
+        prefix = self.settings.embedding_passage_prefix
         embeddings = self.embedding_function(
-            [chunk["text"] for chunk in chunks],
+            [prefix + chunk["text"] for chunk in chunks],
             self.settings.embedding_model_name,
         )
         self.vector_store.add(chunks, embeddings)
@@ -57,16 +58,21 @@ class RAGPipeline:
             relevance_threshold=self.settings.relevance_threshold,
             embedding_function=self.embedding_function,
             embedding_model_name=self.settings.embedding_model_name,
+            query_prefix=self.settings.embedding_query_prefix,
         )
         if not evidence:
             return {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
 
-        prompt = build_prompt(question, evidence)
+        messages = build_messages(question, evidence)
         answer = self.generation_function(
-            prompt,
+            messages,
             model_name=self.settings.llm_model_name,
             max_new_tokens=self.settings.max_new_tokens,
         )
+        # The model signals unanswerable questions with a marker so the reply does not
+        # depend on the model's ability to phrase a refusal in the question's language.
+        if NO_EVIDENCE_MARKER.lower() in answer.lower():
+            return {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
         return {"answer": answer, "sources": _sources_from(evidence)}
 
 
