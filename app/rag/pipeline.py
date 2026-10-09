@@ -7,6 +7,7 @@ from .config import Settings
 from .document_loader import load_document
 from .embedding import embed_texts
 from .generation import generate_answer
+from .grounding import verify_answer
 from .prompt import NO_EVIDENCE_MARKER, build_messages
 from .retrieval import retrieve
 from .vector_store import DuplicateDocumentError, VectorStore
@@ -86,7 +87,7 @@ class RAGPipeline:
             query_prefix=self.settings.embedding_query_prefix,
         )
         if not evidence:
-            return {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
+            return _insufficient_evidence()
 
         messages = build_messages(question, evidence)
         answer = self.generation_function(
@@ -97,14 +98,25 @@ class RAGPipeline:
         # The model signals unanswerable questions with a marker so the reply does not
         # depend on the model's ability to phrase a refusal in the question's language.
         if NO_EVIDENCE_MARKER.lower() in answer.lower():
-            return {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
-        return {"answer": answer, "sources": _sources_from(evidence)}
+            return _insufficient_evidence()
+
+        verification = verify_answer(answer, evidence, question)
+        return {
+            "answer": answer,
+            "sources": _sources_from(evidence, verification["citations"]),
+            "verification": verification,
+        }
 
 
-def _sources_from(evidence):
+def _insufficient_evidence():
+    return {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
+
+
+def _sources_from(evidence, citations):
     return [
         {
             "evidence_number": index,
+            "cited": index in citations,
             "text": item.get("text", ""),
             "filename": item.get("filename"),
             "document_id": item.get("document_id"),

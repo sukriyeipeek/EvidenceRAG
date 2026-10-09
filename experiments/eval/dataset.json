@@ -1,0 +1,56 @@
+{
+  "description": "Turkish evaluation set. 'evidence' is a text fragment that identifies the chunk holding the answer; 'answer' lists groups of alternatives, and every group must appear in a correct answer. Questions without 'document' cannot be answered from the corpus.",
+  "documents": [
+    "data/raw/ornek_rapor.md",
+    "experiments/eval/corpus/mavi_korfez_2025.md",
+    "experiments/eval/corpus/izin_yonergesi.md"
+  ],
+  "questions": [
+    {"id": "yv-su-kaybi", "category": "answerable", "question": "Yeşil Vadi'de su kayıp oranı 2025'te yüzde kaça düştü?", "document": "ornek_rapor.md", "evidence": "yüzde 22'ye düşürdü", "answer": [["22"]]},
+    {"id": "yv-boru-maliyet", "category": "answerable", "question": "Yeşil Vadi'deki boru yenileme projesinin toplam maliyeti nedir?", "document": "ornek_rapor.md", "evidence": "86 milyon lira", "answer": [["86 milyon"]]},
+    {"id": "yv-kredi", "category": "answerable", "question": "Yeşil Vadi'deki boru projesinin ne kadarı İller Bankası kredisiyle karşılandı?", "document": "ornek_rapor.md", "evidence": "İller Bankası", "answer": [["52 milyon"]]},
+    {"id": "yv-otobus", "category": "answerable", "question": "Yeşil Vadi'deki elektrikli otobüs hattında kaç otobüs çalışıyor?", "document": "ornek_rapor.md", "evidence": "14 elektrikli otobüs", "answer": [["14"]]},
+    {"id": "yv-agac", "category": "answerable", "question": "Çınaraltı Parkı'na kaç ağaç dikildi?", "document": "ornek_rapor.md", "evidence": "3.400 yeni ağaç", "answer": [["3.400", "3400"]]},
+    {"id": "yv-geri-donusum", "category": "answerable", "question": "Yeşil Vadi'de geri dönüşüm oranı yüzde kaça çıktı?", "document": "ornek_rapor.md", "evidence": "Geri dönüşüm oranı", "answer": [["19"]]},
+    {"id": "yv-kompost", "category": "answerable", "question": "Kompost tesisi günde kaç ton atık işleyebiliyor?", "document": "ornek_rapor.md", "evidence": "35 ton", "answer": [["35"]]},
+    {"id": "yv-butce-gerceklesme", "category": "answerable", "question": "Yeşil Vadi Belediyesi'nin 2025 bütçe gerçekleşme oranı nedir?", "document": "ornek_rapor.md", "evidence": "yüzde 94", "answer": [["94"]]},
+
+    {"id": "mk-sayac", "category": "answerable", "question": "Mavi Körfez'de kaç akıllı su sayacı takıldı?", "document": "mavi_korfez_2025.md", "evidence": "61.000 akıllı su sayacı", "answer": [["61.000", "61000"]]},
+    {"id": "mk-tramvay-uzunluk", "category": "answerable", "question": "Mavi Körfez tramvay hattı kaç kilometre uzunluğunda?", "document": "mavi_korfez_2025.md", "evidence": "9,6 kilometre", "answer": [["9,6", "9.6"]]},
+    {"id": "mk-tramvay-yolcu", "category": "answerable", "question": "Mavi Körfez tramvayı günde kaç yolcu taşıyor?", "document": "mavi_korfez_2025.md", "evidence": "21.500 yolcu", "answer": [["21.500", "21500"]]},
+    {"id": "mk-bisiklet", "category": "answerable", "question": "Mavi Körfez'deki bisiklet paylaşım sisteminde kaç bisiklet var?", "document": "mavi_korfez_2025.md", "evidence": "300 bisiklet", "answer": [["300"]]},
+    {"id": "mk-yesil-alan", "category": "answerable", "question": "Mavi Körfez'de kişi başına düşen yeşil alan ne kadar?", "document": "mavi_korfez_2025.md", "evidence": "5,8 metrekare", "answer": [["5,8", "5.8"]]},
+    {"id": "mk-gonullu", "category": "answerable", "question": "Mavi Körfez'de kaç gönüllüye afet eğitimi verildi?", "document": "mavi_korfez_2025.md", "evidence": "2.400 gönüllü", "answer": [["2.400", "2400"]]},
+    {"id": "mk-butce-kalem", "category": "answerable", "question": "Mavi Körfez Belediyesi'nin 2025 bütçesindeki en büyük harcama kalemi nedir?", "document": "mavi_korfez_2025.md", "evidence": "yüzde 41 ile ulaşım", "answer": [["ulaşım"]]},
+    {"id": "mk-aritma", "category": "answerable", "question": "Mavi Körfez'deki arıtma tesisinin günlük kapasitesi ne kadar?", "document": "mavi_korfez_2025.md", "evidence": "45.000 metreküp", "answer": [["45.000", "45000"]]},
+
+    {"id": "iz-yillik-az-kidem", "category": "answerable", "question": "Kıdemi 5 yıldan az olan bir çalışan kaç gün yıllık izin kullanır?", "document": "izin_yonergesi.md", "evidence": "14 iş günü", "answer": [["14"]]},
+    {"id": "iz-yillik-cok-kidem", "category": "answerable", "question": "15 yıldan fazla kıdemi olan çalışanlar kaç gün yıllık izin kullanır?", "document": "izin_yonergesi.md", "evidence": "26 iş günü", "answer": [["26"]]},
+    {"id": "iz-talep-suresi", "category": "answerable", "question": "Yıllık izin talebi izinden ne kadar önce yapılmalı?", "document": "izin_yonergesi.md", "evidence": "en az 10 iş günü önce", "answer": [["10"]]},
+    {"id": "iz-babalik", "category": "answerable", "question": "Babalık izni kaç gündür?", "document": "izin_yonergesi.md", "evidence": "babalık izni verilir", "answer": [["10"]]},
+    {"id": "iz-evlilik", "category": "answerable", "question": "Evlenen bir çalışana kaç gün mazeret izni verilir?", "document": "izin_yonergesi.md", "evidence": "Evlilik durumunda", "answer": [["5"]]},
+    {"id": "iz-uzaktan", "category": "answerable", "question": "Haftada en fazla kaç gün uzaktan çalışılabilir?", "document": "izin_yonergesi.md", "evidence": "haftada en fazla 3 gün", "answer": [["3"]]},
+    {"id": "iz-cekirdek-saat", "category": "answerable", "question": "Uzaktan çalışmada çekirdek çalışma saatleri nedir?", "document": "izin_yonergesi.md", "evidence": "10:00 ile 16:00", "answer": [["10:00", "10.00"], ["16:00", "16.00"]]},
+    {"id": "iz-onay-suresi", "category": "answerable", "question": "Yönetici izin talebine kaç gün içinde yanıt vermelidir?", "document": "izin_yonergesi.md", "evidence": "3 iş günü içinde yanıt", "answer": [["3"]]},
+
+    {"id": "en-otobus", "category": "answerable_english", "question": "How many electric buses run on Yeşil Vadi's new bus line?", "document": "ornek_rapor.md", "evidence": "14 elektrikli otobüs", "answer": [["14"]]},
+    {"id": "en-babalik", "category": "answerable_english", "question": "How many days of paternity leave do employees get?", "document": "izin_yonergesi.md", "evidence": "babalık izni verilir", "answer": [["10"]]},
+    {"id": "en-tramvay", "category": "answerable_english", "question": "How long is the Mavi Körfez tram line?", "document": "mavi_korfez_2025.md", "evidence": "9,6 kilometre", "answer": [["9,6", "9.6"]]},
+
+    {"id": "tuzak-baskan", "category": "unanswerable_related", "question": "Yeşil Vadi'nin belediye başkanı kimdir?"},
+    {"id": "tuzak-nufus", "category": "unanswerable_related", "question": "Mavi Körfez'in nüfusu kaç kişidir?"},
+    {"id": "tuzak-yv-tramvay", "category": "unanswerable_related", "question": "Yeşil Vadi'deki tramvay hattı kaç kilometre?"},
+    {"id": "tuzak-mk-otobus", "category": "unanswerable_related", "question": "Mavi Körfez'de kaç elektrikli otobüs çalışıyor?"},
+    {"id": "tuzak-izin-devri", "category": "unanswerable_related", "question": "Kullanılmayan yıllık izin bir sonraki yıla devredilebilir mi?"},
+    {"id": "tuzak-ucretsiz-izin", "category": "unanswerable_related", "question": "Çalışanlara yılda kaç gün ücretsiz izin verilir?"},
+    {"id": "tuzak-2024-butce", "category": "unanswerable_related", "question": "Yeşil Vadi'nin 2024 yılı bütçesi ne kadardı?"},
+    {"id": "tuzak-mk-kredi", "category": "unanswerable_related", "question": "Mavi Körfez altyapı yatırımlarının ne kadarı krediyle finanse edildi?"},
+
+    {"id": "konu-disi-baskent", "category": "unanswerable_offtopic", "question": "Türkiye'nin başkenti neresidir?"},
+    {"id": "konu-disi-python", "category": "unanswerable_offtopic", "question": "Python'da bir liste nasıl sıralanır?"},
+    {"id": "konu-disi-futbol", "category": "unanswerable_offtopic", "question": "Bir futbol maçı kaç dakika sürer?"},
+    {"id": "konu-disi-kuantum", "category": "unanswerable_offtopic", "question": "Kuantum bilgisayar nedir?"},
+    {"id": "konu-disi-pizza", "category": "unanswerable_offtopic", "question": "En iyi pizza tarifi hangisi?"},
+    {"id": "konu-disi-hava", "category": "unanswerable_offtopic", "question": "Bugün hava nasıl?"}
+  ]
+}

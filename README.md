@@ -105,19 +105,34 @@ Yanıt biçimi:
   "sources": [
     {
       "evidence_number": 1,
+      "cited": true,
       "text": "...",
       "filename": "example.pdf",
       "document_id": "document-id",
       "page": 1,
       "source": "example.pdf",
       "chunk_id": "document-id-0",
-      "score": 0.72
+      "score": 0.85
     }
-  ]
+  ],
+  "verification": {
+    "citations": [1],
+    "invalid_citations": [],
+    "unsupported_numbers": []
+  }
 }
 ```
 
-Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt bulunamadığını açıkça bildirir. Kanıt threshold'u geçse de soruyu yanıtlamıyorsa model `NO_EVIDENCE` işareti döndürür; pipeline bu durumda da aynı mesajı boş kaynak listesiyle döner. Böylece ret mesajı küçük modelin dil becerisine bağlı kalmaz.
+Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt bulunamadığını açıkça bildirir. Kanıt threshold'u geçse de soruyu yanıtlamıyorsa model `NO_EVIDENCE` işareti döndürür; pipeline bu durumda da aynı mesajı boş kaynak listesiyle döner. Böylece ret mesajı küçük modelin dil becerisine bağlı kalmaz. Bu durumda `verification` alanı `null` olur.
+
+### Cevap doğrulaması
+
+Her cevap iki basit ama kesin kontrolden geçer (`app/rag/grounding.py`):
+
+- **Atıflar:** Cevaptaki `[Kanıt N]` atıfları okunur. Var olan kanıtlara yapılan atıflar `citations` listesine girer ve ilgili kaynağın `cited` alanı `true` olur; olmayan bir kanıta yapılan atıflar `invalid_citations` listesine düşer.
+- **Sayılar:** Cevaptaki her sayının kanıt metinlerinde veya soruda geçmesi beklenir. Geçmeyenler `unsupported_numbers` listesinde döner. Türkçe yazım farkları (`18.000` / `18000`, `7,4` / `7.4`) eşit sayılır.
+
+Bu kontroller cevabı değiştirmez; web arayüzü sorun bulunduğunda cevabın altında uyarı gösterir. Yorumlanmış veya yeniden ifade edilmiş iddiaları yakalamazlar; uydurulmuş sayıları ve sahte atıfları yakalarlar.
 
 ## Testler
 
@@ -126,6 +141,23 @@ pytest -q
 ```
 
 Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt kısıtlarını, kaynak dönüşünü, yetersiz kanıt davranışını, ayarların environment'tan okunmasını ve API endpoint'lerini (yükleme doğrulaması ve boyut sınırı dahil) kontrol eder. Gerçek embedding modeli veya LLM yüklenmez; bu fonksiyonlar testte sahte fonksiyonlarla değiştirilir, bu yüzden testler birkaç saniyede biter.
+
+## Değerlendirme
+
+`experiments/eval/` altında Türkçe bir değerlendirme seti bulunur: birbirine benzeyen iki belediye raporu ile bir izin yönergesi ve bunlar üzerine 41 soru. Sorular dört gruptadır: cevaplanabilir (Türkçe ve İngilizce), aynı konuda olup cevabı dokümanlarda bulunmayan "tuzak" sorular ve tamamen konu dışı sorular.
+
+```bash
+python experiments/evaluate.py          # retrieval ve threshold taraması, ~1 dakika
+python experiments/evaluate.py --llm    # cevapları da üretip puanlar, CPU'da ~15 dakika
+```
+
+Betik uygulamayla aynı ayarları (environment ve `.env`) kullanır; `--threshold` ve `--top-k` ile geçici olarak değiştirilebilir. Ölçülenler:
+
+- **Retrieval:** doğru chunk'ın ilk sırada (hit@1) ve ilk `TOP_K` içinde (hit@k) bulunma oranı, MRR.
+- **Threshold taraması:** her eşik için korunan cevaplanabilir soru oranı ve elenen konu dışı soru oranı. Önerilen eşik, en düşük ilgili skor ile en yüksek konu dışı skorun ortasıdır.
+- **Cevaplar (`--llm`):** cevaplanabilir sorularda doğru / yanlış / reddedildi; cevaplanamayan sorularda doğru ret / uydurma; doğrulama bulguları ve cevap süresi.
+
+Her çalıştırma `experiments/results/` altına bir JSON raporu yazar (git'e eklenmez). Model, prompt veya eşik değişikliklerinden önce ve sonra çalıştırarak karşılaştırın.
 
 ## Proje yapısı
 
@@ -137,10 +169,20 @@ app/
     document_loader.py
     embedding.py
     generation.py
+    grounding.py
     pipeline.py
     prompt.py
     retrieval.py
     vector_store.py
+data/
+  raw/ornek_rapor.md
+  index/            # kalıcı index (git'e eklenmez)
+experiments/
+  eval/
+    corpus/
+    dataset.json
+  evaluate.py
+  results/          # değerlendirme raporları (git'e eklenmez)
 static/
   app.js
   index.html
@@ -156,4 +198,5 @@ requirements.txt
 - Her yükleme ve silmede index dosyanın tamamı yeniden yazılır; bu, birkaç bin dokümana kadar sorun olmaz.
 - PDF metin çıkarma, taranmış görüntüler için OCR yapmaz.
 - Şu anda yalnızca PDF, TXT ve Markdown desteklenir.
-- LLM yanıtının verilen kanıta dayalı olması prompt ve retrieval threshold ile teşvik edilir; ayrıca claim-level doğrulama katmanı henüz yoktur.
+- Cevap doğrulaması atıfları ve sayıları kontrol eder; sayı içermeyen iddiaların kanıta dayanıp dayanmadığını denetlemez.
+- Değerlendirme seti küçüktür (41 soru, 3 doküman); sonuçlar yön gösterir, kesin değildir.

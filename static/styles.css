@@ -577,6 +577,25 @@ textarea::placeholder {
     text-transform: uppercase;
 }
 
+.answer-warning {
+    margin-top: 14px;
+    padding: 11px 14px;
+    border-left: 3px solid var(--coral);
+    border-radius: 0 10px 10px 0;
+    color: #8a3f2e;
+    background: #fbefeb;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.answer-warning p {
+    margin: 0;
+}
+
+.answer-warning p + p {
+    margin-top: 6px;
+}
+
 .answer-text {
     white-space: pre-wrap;
     color: var(--ink);
@@ -643,6 +662,20 @@ textarea::placeholder {
     border-radius: 8px;
     color: var(--teal-dark);
     background: var(--mint);
+    font-family: "DM Mono", monospace;
+    font-size: 10px;
+}
+
+.source-badges {
+    display: flex;
+    gap: 6px;
+}
+
+.source-cited {
+    padding: 5px 8px;
+    border-radius: 8px;
+    color: var(--white);
+    background: var(--teal);
     font-family: "DM Mono", monospace;
     font-size: 10px;
 }

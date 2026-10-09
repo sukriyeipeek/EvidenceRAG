@@ -185,7 +185,7 @@ async function askQuestion() {
             throw new Error(data.detail || "Cevap oluşturulamadı.");
         }
 
-        renderAnswer(data.answer, data.sources || []);
+        renderAnswer(data.answer, data.sources || [], data.verification);
     } catch (error) {
         showFeedback(askFeedback, error.message, true);
     } finally {
@@ -212,7 +212,7 @@ async function parseResponse(response) {
     return data;
 }
 
-function renderAnswer(answer, sources) {
+function renderAnswer(answer, sources, verification) {
     answerCard.className = "answer-card answer-ready";
     answerCard.replaceChildren();
 
@@ -228,9 +228,32 @@ function renderAnswer(answer, sources) {
     answerText.className = "answer-text";
     answerText.textContent = answer;
     content.append(label, answerText);
+    const warnings = verificationWarnings(verification);
+    if (warnings.length) {
+        const warningBox = document.createElement("div");
+        warningBox.className = "answer-warning";
+        warningBox.setAttribute("role", "note");
+        warnings.forEach((warning) => warningBox.appendChild(textElement("p", "", warning)));
+        content.appendChild(warningBox);
+    }
     answerCard.append(icon, content);
 
     renderSources(sources);
+}
+
+function verificationWarnings(verification) {
+    if (!verification) return [];
+    const warnings = [];
+    if (verification.unsupported_numbers.length) {
+        warnings.push(
+            `Cevaptaki şu sayılar kaynaklarda bulunamadı: ${verification.unsupported_numbers.join(", ")}. Bu değerleri kaynaklardan kontrol et.`
+        );
+    }
+    if (verification.invalid_citations.length) {
+        const cited = verification.invalid_citations.map((number) => `Kanıt ${number}`).join(", ");
+        warnings.push(`Cevap var olmayan kaynaklara atıf yapıyor: ${cited}.`);
+    }
+    return warnings;
 }
 
 function renderSources(sources) {
@@ -255,9 +278,17 @@ function renderSources(sources) {
 
         const top = document.createElement("div");
         top.className = "source-card-top";
+        const badges = document.createElement("span");
+        badges.className = "source-badges";
+        if (source.cited) {
+            const citedBadge = textElement("span", "source-cited", "Atıf");
+            citedBadge.title = "Cevapta bu kaynağa atıf yapıldı";
+            badges.appendChild(citedBadge);
+        }
+        badges.appendChild(textElement("span", "source-score", `Benzerlik ${source.score.toFixed(3)}`));
         top.append(
             textElement("span", "source-number", `KANIT ${String(source.evidence_number || index + 1).padStart(2, "0")}`),
-            textElement("span", "source-score", `Benzerlik ${source.score.toFixed(3)}`)
+            badges
         );
 
         const fileRow = document.createElement("div");

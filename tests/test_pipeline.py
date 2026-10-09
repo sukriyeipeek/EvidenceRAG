@@ -36,6 +36,12 @@ def test_pipeline_indexes_documents_and_returns_sources(tmp_path: Path):
     assert answer["sources"][0]["filename"] == "report.txt"
     assert answer["sources"][0]["text"] == "The event happened in 2024."
     assert answer["sources"][0]["evidence_number"] == 1
+    assert answer["sources"][0]["cited"] is True
+    assert answer["verification"] == {
+        "citations": [1],
+        "invalid_citations": [],
+        "unsupported_numbers": [],
+    }
 
 
 def test_pipeline_reports_insufficient_evidence(tmp_path: Path):
@@ -47,7 +53,7 @@ def test_pipeline_reports_insufficient_evidence(tmp_path: Path):
 
     result = pipeline.ask("What is unrelated?")
 
-    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
+    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
 
 
 def test_pipeline_applies_embedding_prefixes(tmp_path: Path):
@@ -93,7 +99,7 @@ def test_pipeline_reports_insufficient_evidence_when_model_declines(tmp_path: Pa
 
     result = pipeline.ask("Who is the mayor?")
 
-    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
+    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
 
 
 def test_pipeline_registers_documents_and_skips_duplicate_uploads(tmp_path: Path):
