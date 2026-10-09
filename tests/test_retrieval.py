@@ -37,3 +37,13 @@ def test_retrieval_returns_metadata_and_filters_low_scores():
     assert results[0]["filename"] == "a.txt"
     assert results[0]["chunk_id"] == "doc-1-0"
     assert results[0]["score"] >= 0.9
+
+
+def test_vector_store_does_not_modify_caller_embeddings():
+    store = VectorStore()
+    embeddings = np.array([[3.0, 4.0]], dtype="float32")
+
+    store.add([{"text": "t", "metadata": {}}], embeddings)
+    store.search(embeddings[0])
+
+    assert embeddings.tolist() == [[3.0, 4.0]]

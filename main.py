@@ -3,10 +3,15 @@ import os
 import tempfile
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Load .env before any Settings object reads the environment.
+load_dotenv()
 
 from app.rag.document_loader import DocumentError
 from app.rag.generation import LLMGenerationError
@@ -46,7 +51,14 @@ async def upload_document(file: UploadFile = File(...)):
     if suffix not in {".pdf", ".txt", ".md"}:
         raise HTTPException(status_code=400, detail="Supported files are PDF, TXT, and MD")
 
-    content = await file.read()
+    max_bytes = rag_pipeline.settings.max_upload_mb * 1024 * 1024
+    # Read at most one byte past the limit so oversized uploads aren't loaded into memory.
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Uploaded document exceeds the {rag_pipeline.settings.max_upload_mb} MB limit",
+        )
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded document is empty")
 
@@ -55,7 +67,8 @@ async def upload_document(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary_file:
             temporary_file.write(content)
             temporary_path = temporary_file.name
-        return rag_pipeline.index_file(temporary_path, filename=filename)
+        # Embedding is CPU-bound; run it off the event loop so other requests keep being served.
+        return await run_in_threadpool(rag_pipeline.index_file, temporary_path, filename=filename)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (DocumentError, ValueError) as exc:
