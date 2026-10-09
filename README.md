@@ -11,7 +11,7 @@ Metin çıkarma ve temizleme
     ↓
 Overlap'li chunk'lar
     ↓
-Sentence Transformers embedding
+Çok dilli E5 embedding (query: / passage: ön ekleri)
     ↓
 FAISS cosine similarity araması
     ↓
@@ -19,7 +19,7 @@ Relevance threshold ile kanıt seçimi
     ↓
 Evidence-only prompt
     ↓
-Yerel Transformers LLM
+Yerel instruct LLM (Qwen2.5, chat formatı)
     ↓
 Yanıt ve kaynak chunk'ları
 ```
@@ -35,19 +35,21 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir. Model adlarını veya RAG ayarlarını environment variable ile değiştirebilirsiniz:
+İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir (embedding ~470 MB, LLM ~3 GB). Model GPU yoksa CPU'da float32 olarak çalışır; tipik bir dizüstü işlemcide bir cevap 10–30 saniye sürer, ilk soru model yüklemesi nedeniyle daha uzun sürer. Model adlarını veya RAG ayarlarını environment variable ile değiştirebilirsiniz:
 
 | Değişken | Varsayılan | Açıklama |
 | --- | --- | --- |
-| `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Sentence Transformers embedding modeli |
-| `LLM_MODEL_NAME` | `google/flan-t5-small` | `text2text-generation` görevini destekleyen yerel model |
+| `EMBEDDING_MODEL_NAME` | `intfloat/multilingual-e5-small` | Sentence Transformers embedding modeli (Türkçe dahil çok dilli) |
+| `EMBEDDING_QUERY_PREFIX` | `query: ` | Soruya eklenen ön ek; E5 dışı modeller için boş bırakın |
+| `EMBEDDING_PASSAGE_PREFIX` | `passage: ` | Chunk'lara eklenen ön ek; E5 dışı modeller için boş bırakın |
+| `LLM_MODEL_NAME` | `Qwen/Qwen2.5-1.5B-Instruct` | Chat template'i olan, `text-generation` görevini destekleyen yerel model |
 | `CHUNK_SIZE` | `800` | Chunk karakter uzunluğu |
 | `CHUNK_OVERLAP` | `100` | Ardışık chunk'lar arasındaki karakter overlap'i |
 | `TOP_K` | `5` | Retrieval sonucundaki maksimum chunk sayısı |
-| `RELEVANCE_THRESHOLD` | `0.35` | Normalize embedding'lerde cosine similarity alt sınırı |
+| `RELEVANCE_THRESHOLD` | `0.80` | Normalize embedding'lerde cosine similarity alt sınırı |
 | `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
 
-`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Değer, kanıtın yeterince benzer olmadığını düşündüğünüz durumda environment variable ile açıkça değiştirilebilir.
+`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın.
 
 ## Çalıştırma
 
@@ -84,9 +86,11 @@ Yanıt biçimi:
 
 ```json
 {
-  "answer": "... [document-id-0]",
+  "answer": "... [Kanıt 1]",
   "sources": [
     {
+      "evidence_number": 1,
+      "text": "...",
       "filename": "example.pdf",
       "document_id": "document-id",
       "page": 1,
@@ -98,7 +102,7 @@ Yanıt biçimi:
 }
 ```
 
-Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt bulunamadığını açıkça bildirir.
+Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt bulunamadığını açıkça bildirir. Kanıt threshold'u geçse de soruyu yanıtlamıyorsa model `NO_EVIDENCE` işareti döndürür; pipeline bu durumda da aynı mesajı boş kaynak listesiyle döner. Böylece ret mesajı küçük modelin dil becerisine bağlı kalmaz.
 
 ## Testler
 

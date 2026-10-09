@@ -1,18 +1,26 @@
-def build_prompt(question, evidence):
+NO_EVIDENCE_MARKER = "NO_EVIDENCE"
+
+SYSTEM_PROMPT = f"""You are an evidence-grounded assistant.
+Only answer using the supplied evidence. Do not use outside knowledge or invent facts.
+If the evidence does not contain the answer, reply with only {NO_EVIDENCE_MARKER} and nothing else.
+Cite supporting evidence in the answer using its number, for example [Kanıt 1].
+Do not show internal chunk IDs in the answer."""
+
+
+def build_messages(question, evidence):
     evidence_text = "\n\n".join(
         _format_evidence(index, item) for index, item in enumerate(evidence, start=1)
     )
-    return f"""You are an evidence-grounded assistant.
-Only answer using the supplied evidence. Do not use outside knowledge or invent facts.
-If the evidence is insufficient, say that there is not enough evidence to answer.
-Cite supporting evidence in the answer using its number, for example [Kanıt 1].
-Do not show internal chunk IDs in the answer.
-
-Evidence:
-{evidence_text}
-
-Question: {question}
-Answer:"""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"Evidence:\n{evidence_text}\n\nQuestion: {question}\n\n"
+                "Answer in the same language as the question."
+            ),
+        },
+    ]
 
 
 def _format_evidence(index, item):

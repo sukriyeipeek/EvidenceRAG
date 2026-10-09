@@ -10,9 +10,10 @@ def fake_embed(texts, model_name):
     return np.array([[1.0, 0.0] for _ in texts], dtype="float32")
 
 
-def fake_generate(prompt, model_name, max_new_tokens):
-    assert "Only answer using the supplied evidence" in prompt
-    return "The evidence says the event happened in 2024. [doc-1-0]"
+def fake_generate(messages, model_name, max_new_tokens):
+    assert "Only answer using the supplied evidence" in messages[0]["content"]
+    assert "The event happened in 2024." in messages[1]["content"]
+    return "The evidence says the event happened in 2024. [Kanıt 1]"
 
 
 def test_pipeline_indexes_documents_and_returns_sources(tmp_path: Path):
@@ -43,5 +44,51 @@ def test_pipeline_reports_insufficient_evidence(tmp_path: Path):
     pipeline.index_file(document)
 
     result = pipeline.ask("What is unrelated?")
+
+    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
+
+
+def test_pipeline_applies_embedding_prefixes(tmp_path: Path):
+    document = tmp_path / "report.txt"
+    document.write_text("The event happened in 2024.", encoding="utf-8")
+    embedded = []
+
+    def recording_embed(texts, model_name):
+        embedded.extend(texts)
+        return fake_embed(texts, model_name)
+
+    settings = Settings(
+        embedding_query_prefix="query: ",
+        embedding_passage_prefix="passage: ",
+        relevance_threshold=0.3,
+    )
+    pipeline = RAGPipeline(
+        settings=settings,
+        embedding_function=recording_embed,
+        generation_function=fake_generate,
+    )
+
+    pipeline.index_file(document)
+    pipeline.ask("When did the event happen?")
+
+    assert embedded == ["passage: The event happened in 2024.", "query: When did the event happen?"]
+    assert pipeline.vector_store.chunks[0]["text"] == "The event happened in 2024."
+
+
+def test_pipeline_reports_insufficient_evidence_when_model_declines(tmp_path: Path):
+    document = tmp_path / "report.txt"
+    document.write_text("The event happened in 2024.", encoding="utf-8")
+
+    def declining_generate(messages, model_name, max_new_tokens):
+        return "The evidence does not mention the mayor.\n\nNO_EVIDENCE"
+
+    pipeline = RAGPipeline(
+        settings=Settings(relevance_threshold=0.3),
+        embedding_function=fake_embed,
+        generation_function=declining_generate,
+    )
+    pipeline.index_file(document)
+
+    result = pipeline.ask("Who is the mayor?")
 
     assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
