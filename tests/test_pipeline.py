@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.rag.config import Settings
 from app.rag.pipeline import INSUFFICIENT_EVIDENCE, RAGPipeline
+from app.rag.vector_store import DuplicateDocumentError
 
 
 def fake_embed(texts, model_name):
@@ -92,3 +94,29 @@ def test_pipeline_reports_insufficient_evidence_when_model_declines(tmp_path: Pa
     result = pipeline.ask("Who is the mayor?")
 
     assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": []}
+
+
+def test_pipeline_registers_documents_and_skips_duplicate_uploads(tmp_path: Path):
+    document = tmp_path / "report.txt"
+    document.write_text("The event happened in 2024.", encoding="utf-8")
+    copy = tmp_path / "copy-of-report.txt"
+    copy.write_text("The event happened in 2024.", encoding="utf-8")
+    embedded = []
+
+    def recording_embed(texts, model_name):
+        embedded.extend(texts)
+        return fake_embed(texts, model_name)
+
+    pipeline = RAGPipeline(settings=Settings(), embedding_function=recording_embed)
+    result = pipeline.index_file(document)
+
+    with pytest.raises(DuplicateDocumentError):
+        pipeline.index_file(copy)
+
+    [registered] = pipeline.list_documents()
+    assert registered["document_id"] == result["document_id"]
+    assert registered["filename"] == "report.txt"
+    assert registered["chunks"] == 1
+    assert registered["pages"] is None
+    assert len(registered["sha256"]) == 64
+    assert len(embedded) == 1

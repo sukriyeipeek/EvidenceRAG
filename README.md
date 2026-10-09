@@ -24,7 +24,7 @@ Yerel instruct LLM (Qwen2.5, chat formatı)
 Yanıt ve kaynak chunk'ları
 ```
 
-PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Vector store şu an süreç belleğindedir; uygulama yeniden başlatıldığında dokümanlar yeniden yüklenmelidir.
+PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Index, chunk'lar ve doküman kayıtları `data/index/store.npz` dosyasına kaydedilir ve uygulama yeniden başlatıldığında otomatik yüklenir. Dosya her değişiklikte tek adımda yerine yazılır; yazma yarıda kesilirse önceki kayıt bozulmaz.
 
 ## Kurulum
 
@@ -49,6 +49,7 @@ pip install -r requirements.txt
 | `RELEVANCE_THRESHOLD` | `0.80` | Normalize embedding'lerde cosine similarity alt sınırı |
 | `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
 | `MAX_UPLOAD_MB` | `20` | Yüklenebilecek en büyük doküman boyutu; aşan dosyalar `413` ile reddedilir |
+| `INDEX_DIR` | `data/index` | Kalıcı index'in tutulduğu klasör (göreli yollar proje köküne göre) |
 
 `RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın.
 
@@ -73,7 +74,20 @@ curl -X POST http://127.0.0.1:8000/documents \
   -F "file=@./data/example.pdf"
 ```
 
-Desteklenen formatlar: `.pdf`, `.txt`, `.md`.
+Desteklenen formatlar: `.pdf`, `.txt`, `.md`. Aynı içerikteki bir dosya (adı farklı olsa bile) tekrar yüklenirse embedding hesaplanmadan `409` döner.
+
+### Dokümanları listeleme ve silme
+
+```bash
+curl http://127.0.0.1:8000/documents
+curl -X DELETE http://127.0.0.1:8000/documents/<document_id>
+```
+
+Silinen dokümanın chunk'ları index'ten çıkarılır ve artık kanıt olarak kullanılmaz. Web arayüzündeki "Yüklü dokümanlar" listesi de aynı işlemleri yapar.
+
+### Embedding ayarlarını değiştirmek
+
+Kayıtlı index, hangi embedding modeli ve ön eklerle oluşturulduğunu saklar. `EMBEDDING_MODEL_NAME`, `EMBEDDING_QUERY_PREFIX` veya `EMBEDDING_PASSAGE_PREFIX` değiştirilirse eski vektörler yeni modelle karşılaştırılamaz; uygulama bu durumda sessizce yanlış sonuç döndürmek yerine açık bir hatayla başlamaz. Eski ayarlara dönün ya da `data/index/store.npz` dosyasını silip dokümanları yeniden yükleyin.
 
 ### Soru sorma
 
@@ -138,7 +152,8 @@ requirements.txt
 
 ## Bilinen sınırlamalar
 
-- Vector store kalıcı değildir ve tek proses belleğinde tutulur.
+- Index tek proses için tasarlanmıştır; aynı `INDEX_DIR`'i kullanan birden fazla uvicorn worker'ı birbirinin değişikliklerini görmez.
+- Her yükleme ve silmede index dosyanın tamamı yeniden yazılır; bu, birkaç bin dokümana kadar sorun olmaz.
 - PDF metin çıkarma, taranmış görüntüler için OCR yapmaz.
 - Şu anda yalnızca PDF, TXT ve Markdown desteklenir.
 - LLM yanıtının verilen kanıta dayalı olması prompt ve retrieval threshold ile teşvik edilir; ayrıca claim-level doğrulama katmanı henüz yoktur.

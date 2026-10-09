@@ -13,6 +13,8 @@ const sourceCount = document.getElementById("sourceCount");
 const chunkCount = document.getElementById("chunkCount");
 const healthDot = document.getElementById("healthDot");
 const healthText = document.getElementById("healthText");
+const documentsList = document.getElementById("documentsList");
+const documentCount = document.getElementById("documentCount");
 
 fileInput.addEventListener("change", () => {
     updateSelectedFile(fileInput.files[0]);
@@ -49,7 +51,10 @@ questionInput.addEventListener("keydown", (event) => {
     }
 });
 
-window.addEventListener("load", refreshHealth);
+window.addEventListener("load", () => {
+    refreshHealth();
+    refreshDocuments();
+});
 
 function updateSelectedFile(file) {
     if (!file) {
@@ -84,12 +89,78 @@ async function uploadDocument() {
             uploadFeedback,
             `${data.filename} başarıyla indexlendi. ${data.chunks_indexed} chunk eklendi.`
         );
-        await refreshHealth();
+        await Promise.all([refreshHealth(), refreshDocuments()]);
     } catch (error) {
         showFeedback(uploadFeedback, error.message, true);
     } finally {
         setButtonLoading(uploadButton, false, "Dokümanı indexle");
     }
+}
+
+async function refreshDocuments() {
+    try {
+        const response = await fetch("/documents");
+        const data = await parseResponse(response);
+        if (!response.ok) throw new Error();
+        renderDocuments(data.documents || []);
+    } catch {
+        documentCount.textContent = "-";
+    }
+}
+
+function renderDocuments(documents) {
+    documentsList.replaceChildren();
+    documentCount.textContent = documents.length;
+
+    if (!documents.length) {
+        documentsList.appendChild(textElement("li", "documents-empty", "Henüz doküman yüklenmedi."));
+        return;
+    }
+
+    documents.forEach((doc) => {
+        const item = document.createElement("li");
+        item.className = "document-item";
+
+        const info = document.createElement("div");
+        info.className = "document-info";
+        const details = [`${doc.chunks} chunk`];
+        if (doc.pages) details.push(`${doc.pages} sayfa`);
+        info.append(
+            textElement("strong", "document-name", doc.filename),
+            textElement("span", "document-meta", details.join(" · "))
+        );
+        info.firstChild.title = doc.filename;
+
+        const deleteButton = textElement("button", "document-delete", "×");
+        deleteButton.type = "button";
+        deleteButton.title = "Dokümanı sil";
+        deleteButton.setAttribute("aria-label", `${doc.filename} dokümanını sil`);
+        deleteButton.addEventListener("click", () => deleteDocument(doc, deleteButton));
+
+        item.append(textElement("span", "file-symbol", "▤"), info, deleteButton);
+        documentsList.appendChild(item);
+    });
+}
+
+async function deleteDocument(doc, button) {
+    if (!window.confirm(`"${doc.filename}" indexten silinsin mi? Bu dokümandan gelen kanıtlar artık kullanılmayacak.`)) {
+        return;
+    }
+
+    button.disabled = true;
+    clearFeedback(uploadFeedback);
+    try {
+        const response = await fetch(`/documents/${encodeURIComponent(doc.document_id)}`, { method: "DELETE" });
+        const data = await parseResponse(response);
+        if (!response.ok) {
+            throw new Error(data.detail || "Doküman silinemedi.");
+        }
+        showFeedback(uploadFeedback, `${doc.filename} silindi.`);
+    } catch (error) {
+        showFeedback(uploadFeedback, error.message, true);
+        button.disabled = false;
+    }
+    await Promise.all([refreshHealth(), refreshDocuments()]);
 }
 
 async function askQuestion() {

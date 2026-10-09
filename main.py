@@ -13,17 +13,28 @@ from pydantic import BaseModel
 # Load .env before any Settings object reads the environment.
 load_dotenv()
 
+from app.rag.config import Settings
 from app.rag.document_loader import DocumentError
 from app.rag.generation import LLMGenerationError
 from app.rag.pipeline import RAGPipeline
+from app.rag.vector_store import DuplicateDocumentError, VectorStore
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+project_directory = Path(__file__).parent
+settings = Settings()
+rag_pipeline = RAGPipeline(
+    settings=settings,
+    vector_store=VectorStore(
+        persist_path=project_directory / settings.index_dir / "store.npz",
+        signature=settings.embedding_signature(),
+    ),
+)
+
 app = FastAPI(title="EvidenceRAG")
-rag_pipeline = RAGPipeline()
-static_directory = Path(__file__).parent / "static"
+static_directory = project_directory / "static"
 app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 
@@ -69,6 +80,8 @@ async def upload_document(file: UploadFile = File(...)):
             temporary_path = temporary_file.name
         # Embedding is CPU-bound; run it off the event loop so other requests keep being served.
         return await run_in_threadpool(rag_pipeline.index_file, temporary_path, filename=filename)
+    except DuplicateDocumentError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (DocumentError, ValueError) as exc:
@@ -79,6 +92,18 @@ async def upload_document(file: UploadFile = File(...)):
     finally:
         if temporary_path and os.path.exists(temporary_path):
             os.unlink(temporary_path)
+
+
+@app.get("/documents")
+def list_documents():
+    return {"documents": rag_pipeline.list_documents()}
+
+
+@app.delete("/documents/{document_id}")
+def delete_document(document_id: str):
+    if not rag_pipeline.delete_document(document_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"document_id": document_id, "deleted": True}
 
 
 @app.post("/ask")
