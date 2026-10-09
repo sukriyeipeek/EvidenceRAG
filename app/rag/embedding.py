@@ -1,11 +1,13 @@
 from functools import lru_cache
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 
 @lru_cache(maxsize=2)
 def get_embedding_model(model_name="intfloat/multilingual-e5-small"):
+    # Imported lazily: sentence-transformers pulls in torch, which takes seconds to load.
+    from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(model_name)
 
 

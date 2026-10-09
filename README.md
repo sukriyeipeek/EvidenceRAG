@@ -35,7 +35,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir (embedding ~470 MB, LLM ~3 GB). Model GPU yoksa CPU'da float32 olarak çalışır; tipik bir dizüstü işlemcide bir cevap 10–30 saniye sürer, ilk soru model yüklemesi nedeniyle daha uzun sürer. Model adlarını veya RAG ayarlarını environment variable ile değiştirebilirsiniz:
+İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir (embedding ~470 MB, LLM ~3 GB). Model GPU yoksa CPU'da float32 olarak çalışır; tipik bir dizüstü işlemcide bir cevap 10–30 saniye sürer, ilk soru model yüklemesi nedeniyle daha uzun sürer. Model adlarını veya RAG ayarlarını environment variable ile ya da proje kökündeki bir `.env` dosyasıyla değiştirebilirsiniz (`.env.example` dosyasını kopyalayıp düzenleyin; ortamda zaten tanımlı değişkenler `.env`'deki değerlerden önceliklidir):
 
 | Değişken | Varsayılan | Açıklama |
 | --- | --- | --- |
@@ -48,6 +48,7 @@ pip install -r requirements.txt
 | `TOP_K` | `5` | Retrieval sonucundaki maksimum chunk sayısı |
 | `RELEVANCE_THRESHOLD` | `0.80` | Normalize embedding'lerde cosine similarity alt sınırı |
 | `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
+| `MAX_UPLOAD_MB` | `20` | Yüklenebilecek en büyük doküman boyutu; aşan dosyalar `413` ile reddedilir |
 
 `RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın.
 
@@ -110,7 +111,7 @@ Kanıt threshold değerini geçmiyorsa LLM çağrılmaz ve sistem yeterli kanıt
 pytest -q
 ```
 
-Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt kısıtlarını, kaynak dönüşünü ve yetersiz kanıt davranışını kontrol eder. Gerçek LLM çağrısı yapılmaz; generation fonksiyonu testte sahte bir fonksiyonla değiştirilir.
+Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt kısıtlarını, kaynak dönüşünü, yetersiz kanıt davranışını, ayarların environment'tan okunmasını ve API endpoint'lerini (yükleme doğrulaması ve boyut sınırı dahil) kontrol eder. Gerçek embedding modeli veya LLM yüklenmez; bu fonksiyonlar testte sahte fonksiyonlarla değiştirilir, bu yüzden testler birkaç saniyede biter.
 
 ## Proje yapısı
 
