@@ -76,16 +76,21 @@ class RAGPipeline:
     def delete_document(self, document_id):
         return self.vector_store.delete_document(document_id)
 
-    def ask(self, question):
-        evidence = retrieve(
+    def find_evidence(self, question, relevance_threshold=None):
+        if relevance_threshold is None:
+            relevance_threshold = self.settings.relevance_threshold
+        return retrieve(
             question,
             self.vector_store,
             top_k=self.settings.top_k,
-            relevance_threshold=self.settings.relevance_threshold,
+            relevance_threshold=relevance_threshold,
             embedding_function=self.embedding_function,
             embedding_model_name=self.settings.embedding_model_name,
             query_prefix=self.settings.embedding_query_prefix,
         )
+
+    def ask(self, question):
+        evidence = self.find_evidence(question)
         if not evidence:
             return _insufficient_evidence()
 
