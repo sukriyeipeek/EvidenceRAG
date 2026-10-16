@@ -6,8 +6,13 @@ from pathlib import Path
 import numpy as np
 import faiss
 
+from .keyword_index import KeywordIndex
+
 
 STORE_FORMAT_VERSION = 1
+# The usual reciprocal rank fusion constant; it keeps the first few ranks from
+# dominating the merged order.
+RRF_K = 60
 
 
 class DuplicateDocumentError(Exception):
@@ -37,6 +42,7 @@ class VectorStore:
         # index, the chunk list and the document registry must change together, so every
         # read and write holds this lock.
         self._lock = threading.Lock()
+        self._keyword_index = None
 
         if self.persist_path and self.persist_path.exists():
             self._load()
@@ -87,6 +93,7 @@ class VectorStore:
             # IndexFlat has no stable ids, so rebuild it from the remaining vectors.
             embeddings = self._all_embeddings()[keep]
             self.chunks = [self.chunks[position] for position in keep]
+            self._keyword_index = None
             self.index = None
             if len(keep):
                 self.index = faiss.IndexFlatIP(embeddings.shape[1])
@@ -115,18 +122,52 @@ class VectorStore:
                 if index >= 0
             ]
 
-        results = []
-        for score, chunk in matched:
-            metadata = dict(chunk["metadata"])
-            results.append(
-                {
-                    "text": chunk["text"],
-                    "score": score,
-                    "metadata": metadata,
-                    **metadata,
-                }
-            )
-        return results
+        return [_result(chunk, score) for score, chunk in matched]
+
+    def hybrid_search(self, query_text, query_embedding, top_k=5, candidates=30, keyword_weight=1.0):
+        """Merge vector and keyword (BM25) rankings with reciprocal rank fusion.
+
+        Each search proposes its best `candidates` chunks; a chunk scores
+        1 / (RRF_K + rank) in every list it appears in, so chunks both searches rank
+        well come first. keyword_weight scales the BM25 list's votes against the
+        vector list's. "score" stays the cosine similarity, which the relevance
+        threshold is calibrated on, and "fused_score" holds the RRF score.
+        """
+        if self.is_empty or top_k <= 0:
+            return []
+
+        query_embedding = np.array(query_embedding, dtype="float32").reshape(1, -1)
+        faiss.normalize_L2(query_embedding)
+
+        with self._lock:
+            if self.index is None:
+                return []
+            pool = min(candidates, len(self.chunks))
+            _, indices = self.index.search(query_embedding, pool)
+            vector_ranking = [int(index) for index in indices[0] if index >= 0]
+            keyword_ranking = [position for position, _ in self._keywords().search(query_text, pool)]
+
+            fused = {}
+            for ranking, weight in ((vector_ranking, 1.0), (keyword_ranking, keyword_weight)):
+                for rank, position in enumerate(ranking, start=1):
+                    fused[position] = fused.get(position, 0.0) + weight / (RRF_K + rank)
+            best = sorted(fused, key=fused.get, reverse=True)[:top_k]
+            matched = [
+                (
+                    float(self.index.reconstruct(position) @ query_embedding[0]),
+                    fused[position],
+                    self.chunks[position],
+                )
+                for position in best
+            ]
+
+        return [_result(chunk, score, fused_score=fused_score) for score, fused_score, chunk in matched]
+
+    def _keywords(self):
+        # Built on first use after the chunks change; callers hold the lock.
+        if self._keyword_index is None:
+            self._keyword_index = KeywordIndex([chunk["text"] for chunk in self.chunks])
+        return self._keyword_index
 
     @staticmethod
     def _prepare_embeddings(chunks, embeddings):
@@ -150,6 +191,7 @@ class VectorStore:
 
         self.index.add(embeddings)
         self.chunks.extend(chunks)
+        self._keyword_index = None
 
     def _find_by_hash(self, sha256):
         if not sha256:
@@ -209,3 +251,8 @@ class VectorStore:
         if len(embeddings):
             self.index = faiss.IndexFlatIP(embeddings.shape[1])
             self.index.add(np.ascontiguousarray(embeddings, dtype="float32"))
+
+
+def _result(chunk, score, **extra):
+    metadata = dict(chunk["metadata"])
+    return {"text": chunk["text"], "score": score, **extra, "metadata": metadata, **metadata}

@@ -87,6 +87,9 @@ class RAGPipeline:
             embedding_function=self.embedding_function,
             embedding_model_name=self.settings.embedding_model_name,
             query_prefix=self.settings.embedding_query_prefix,
+            hybrid=self.settings.hybrid_search,
+            candidates=self.settings.retrieval_candidates,
+            keyword_weight=self.settings.keyword_weight,
         )
 
     def ask(self, question):
