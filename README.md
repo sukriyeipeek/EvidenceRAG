@@ -7,13 +7,15 @@ EvidenceRAG, kullanıcının yüklediği dokümanlardan kanıt parçaları getir
 ```text
 PDF / TXT / MD
     ↓
-Metin çıkarma ve temizleme
+Metin çıkarma (metin katmanı olmayan PDF sayfalarında OCR)
     ↓
-Overlap'li chunk'lar
+Başlık yolu eklenmiş, bölüm sınırından bölünmüş chunk'lar; tablo satırları ayrı chunk
     ↓
 Çok dilli E5 embedding (query: / passage: ön ekleri)
     ↓
-FAISS cosine similarity araması
+FAISS cosine araması + BM25 kelime araması → ağırlıklı RRF ile birleştirme
+    ↓
+(İsteğe bağlı) cross-encoder reranker
     ↓
 Relevance threshold ile kanıt seçimi
     ↓
@@ -23,6 +25,8 @@ Yerel instruct LLM (Qwen2.5, chat formatı)
     ↓
 Yanıt ve kaynak chunk'ları
 ```
+
+Markdown dokümanlarda her chunk, üstündeki başlıkların yoluyla başlar (`Rapor > Bütçe: ...`); böylece bir bölümün ortasından gelen chunk bile hangi doküman ve bölüme ait olduğunu söyler. Markdown tablolarının her satırı, sütun adlarıyla yazılmış ayrı bir chunk olur (`Ürün grubu: Kırtasiye; Bayi iskontosu: %14; ...`).
 
 PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Index, chunk'lar ve doküman kayıtları `data/index/store.npz` dosyasına kaydedilir ve uygulama yeniden başlatıldığında otomatik yüklenir. Dosya her değişiklikte tek adımda yerine yazılır; yazma yarıda kesilirse önceki kayıt bozulmaz.
 
@@ -47,11 +51,19 @@ pip install -r requirements.txt
 | `CHUNK_OVERLAP` | `100` | Ardışık chunk'lar arasındaki karakter overlap'i |
 | `TOP_K` | `5` | Retrieval sonucundaki maksimum chunk sayısı |
 | `RELEVANCE_THRESHOLD` | `0.80` | Normalize embedding'lerde cosine similarity alt sınırı |
+| `HYBRID_SEARCH` | `true` | Vektör aramasını BM25 kelime aramasıyla birleştirir |
+| `RETRIEVAL_CANDIDATES` | `30` | Birleştirmeden önce her aramanın önerdiği chunk sayısı |
+| `KEYWORD_WEIGHT` | `0.5` | Birleştirmede BM25 listesinin vektör listesine göre ağırlığı |
+| `RERANKER_MODEL_NAME` | boş (kapalı) | Cross-encoder reranker modeli, ör. `BAAI/bge-reranker-v2-m3` (~2.3 GB, CPU'da soru başına ~5 sn) |
+| `RERANK_CANDIDATES` | `20` | Reranker'ın aralarından seçtiği aday chunk sayısı |
+| `OCR_LANGUAGES` | `tr,en` | Metin katmanı olmayan PDF sayfaları için EasyOCR dilleri; boş bırakılırsa OCR kapanır |
 | `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
 | `MAX_UPLOAD_MB` | `20` | Yüklenebilecek en büyük doküman boyutu; aşan dosyalar `413` ile reddedilir |
 | `INDEX_DIR` | `data/index` | Kalıcı index'in tutulduğu klasör (göreli yollar proje köküne göre) |
 
-`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın.
+`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın. Hibrit arama ve reranker sıralamayı değiştirir ama eşik her zaman cosine skoruna uygulanır; yalnızca kelime eşleşmesiyle alakasız bir chunk kanıt sayılmaz.
+
+Taranmış bir PDF'in ilk yüklemesi, EasyOCR modellerini indirir (~100 MB); CPU'da bir sayfa ~8 saniyede okunur. OCR ile okunan chunk'ların metadata'sında `"ocr": true` bulunur.
 
 ## Çalıştırma
 
@@ -144,36 +156,55 @@ Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt k�
 
 ## Değerlendirme
 
-`experiments/eval/` altında Türkçe bir değerlendirme seti bulunur: birbirine benzeyen iki belediye raporu ile bir izin yönergesi ve bunlar üzerine 41 soru. Sorular dört gruptadır: cevaplanabilir (Türkçe ve İngilizce), aynı konuda olup cevabı dokümanlarda bulunmayan "tuzak" sorular ve tamamen konu dışı sorular.
+`experiments/eval/` altında iki Türkçe değerlendirme seti bulunur:
+
+- `dataset.json`: birbirine benzeyen iki belediye raporu ile bir izin yönergesi ve bunlar üzerine 41 soru. Sorular dört gruptadır: cevaplanabilir (Türkçe ve İngilizce), aynı konuda olup cevabı dokümanlarda bulunmayan "tuzak" sorular ve tamamen konu dışı sorular.
+- `dataset_hard.json`: ilk set hit@1 1.00'e ulaştığı için eklenen daha zor set. Kurgusal bir e-belge yönergesi (hata kodu tablosu, birbirine benzeyen iptal/itiraz bölümleri), 20 satırlık bir bayi koşulları tablosu ve yalnızca OCR ile okunabilen taranmış bir PDF (`make_scanned_pdf.py` ile üretilir) içerir; ilk setin dokümanları dikkat dağıtıcı olarak eklenir. Cevaplanabilir sorular, onları zorlaştıran şeye göre etiketlidir: `code`, `table`, `confusable`, `paraphrase`, `prose`, `scanned`.
 
 ```bash
-python experiments/evaluate.py          # retrieval ve threshold taraması, ~1 dakika
-python experiments/evaluate.py --llm    # cevapları da üretip puanlar, CPU'da ~15 dakika
+python experiments/evaluate.py                                          # retrieval ve threshold taraması, ~1 dakika
+python experiments/evaluate.py --dataset experiments/eval/dataset_hard.json
+python experiments/evaluate.py --llm                                    # cevapları da üretip puanlar, CPU'da ~15-20 dakika
 ```
 
 Betik uygulamayla aynı ayarları (environment ve `.env`) kullanır; `--threshold` ve `--top-k` ile geçici olarak değiştirilebilir. Ölçülenler:
 
-- **Retrieval:** doğru chunk'ın ilk sırada (hit@1) ve ilk `TOP_K` içinde (hit@k) bulunma oranı, MRR.
+- **Retrieval:** doğru chunk'ın ilk sırada (hit@1) ve ilk `TOP_K` içinde (hit@k) bulunma oranı, MRR; soru tipine göre ayrıca ve soru başına ortanca arama süresi.
 - **Threshold taraması:** her eşik için korunan cevaplanabilir soru oranı ve elenen konu dışı soru oranı. Önerilen eşik, en düşük ilgili skor ile en yüksek konu dışı skorun ortasıdır.
 - **Cevaplar (`--llm`):** cevaplanabilir sorularda doğru / yanlış / reddedildi; cevaplanamayan sorularda doğru ret / uydurma; doğrulama bulguları ve cevap süresi.
 
-Her çalıştırma `experiments/results/` altına bir JSON raporu yazar (git'e eklenmez). Model, prompt veya eşik değişikliklerinden önce ve sonra çalıştırarak karşılaştırın.
+Her çalıştırma `experiments/results/` altına bir JSON raporu yazar (git'e eklenmez). Model, prompt veya eşik değişikliklerinden önce ve sonra çalıştırarak karşılaştırın. Yüklenemeyen dokümanlar (ör. OCR kapalıyken taranmış PDF) atlanır ve rapora yazılır; o dokümana ait sorular bulunamadı sayılır.
+
+Zor sette her geliştirmenin retrieval etkisi (cevaplanabilir 26 soru, CPU):
+
+| Adım | hit@1 | hit@5 | MRR | Arama süresi |
+| --- | --- | --- | --- | --- |
+| Başlangıç | 0.58 | 0.85 | 0.68 | 0.02 sn |
+| + başlık yolu | 0.65 | 0.85 | 0.74 | 0.08 sn |
+| + tablo satırları | 0.81 | 0.89 | 0.84 | 0.04 sn |
+| + BM25 hibrit arama | 0.85 | 0.89 | 0.86 | 0.03 sn |
+| + OCR (varsayılan ayarlar) | 0.92 | 1.00 | 0.96 | 0.02 sn |
+
+`BAAI/bge-reranker-v2-m3` reranker'ı OCR'sız durumda hit@1'i 0.85'ten 0.89'a çıkardı (bulunabilen 23 sorunun hepsi ilk sırada) ama arama süresini soru başına ~5.5 saniyeye çıkardığı için varsayılan olarak kapalıdır.
 
 ## Proje yapısı
 
 ```text
 app/
   rag/
-    chunking.py
+    chunking.py         # başlık yolu, tablo satırları, chunk'lara bölme
     config.py
     document_loader.py
     embedding.py
     generation.py
     grounding.py
+    keyword_index.py    # BM25 kelime araması
+    ocr.py              # taranmış PDF sayfaları için EasyOCR
     pipeline.py
     prompt.py
+    reranking.py        # isteğe bağlı cross-encoder reranker
     retrieval.py
-    vector_store.py
+    vector_store.py     # FAISS + hibrit arama
 data/
   raw/ornek_rapor.md
   index/            # kalıcı index (git'e eklenmez)
@@ -181,6 +212,8 @@ experiments/
   eval/
     corpus/
     dataset.json
+    dataset_hard.json
+    make_scanned_pdf.py
   evaluate.py
   results/          # değerlendirme raporları (git'e eklenmez)
 static/
@@ -196,7 +229,10 @@ requirements.txt
 
 - Index tek proses için tasarlanmıştır; aynı `INDEX_DIR`'i kullanan birden fazla uvicorn worker'ı birbirinin değişikliklerini görmez.
 - Her yükleme ve silmede index dosyanın tamamı yeniden yazılır; bu, birkaç bin dokümana kadar sorun olmaz.
-- PDF metin çıkarma, taranmış görüntüler için OCR yapmaz.
+- Başlık yolu ve tablo satırları yalnızca Markdown'da tanınır. PDF'ten çıkan metin düz olduğu için PDF başlıkları ve tabloları bu iyileştirmelerden yararlanmaz; bunun için Docling gibi yapı çıkaran bir ayrıştırıcı gerekir.
+- Chunk'lama değiştiğinde (bu sürümde başlık yolu ve tablo satırları eklendi) eski kayıtlı index otomatik yenilenmez; yeni davranış için dokümanları silip yeniden yükleyin.
+- OCR çıktısı hatalar içerebilir (ör. `kâğıt` yerine `k~âğıt`); sayılar genelde doğru okunur ama kontrol edilmelidir.
+- Kelime araması kelimelerin ilk beş harfiyle eşleşir; çok kısa kelimeler ve beş harften sonra ayrılan kelimeler için kaba bir yaklaşımdır.
 - Şu anda yalnızca PDF, TXT ve Markdown desteklenir.
 - Cevap doğrulaması atıfları ve sayıları kontrol eder; sayı içermeyen iddiaların kanıta dayanıp dayanmadığını denetlemez.
-- Değerlendirme seti küçüktür (41 soru, 3 doküman); sonuçlar yön gösterir, kesin değildir.
+- Değerlendirme setleri küçüktür (41 ve 37 soru); bir sorunun sırası değişince skor 0.04 oynar. Sonuçlar yön gösterir, kesin değildir.
