@@ -44,6 +44,7 @@ class RAGPipeline:
             path,
             filename=filename,
             source=source or filename,
+            ocr_languages=[code.strip() for code in self.settings.ocr_languages.split(",") if code.strip()],
         )
         chunks = chunk_documents(
             pages,

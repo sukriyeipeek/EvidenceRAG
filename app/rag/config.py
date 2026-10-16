@@ -71,6 +71,9 @@ class Settings:
     # 5 s per question on a CPU, so it is off by default.
     reranker_model_name: str = field(default_factory=_prefix_env("RERANKER_MODEL_NAME", ""))
     rerank_candidates: int = field(default_factory=_int_env("RERANK_CANDIDATES", 20))
+    # EasyOCR language codes for PDF pages that have no text layer, comma-separated;
+    # empty disables OCR and such documents are rejected as empty.
+    ocr_languages: str = field(default_factory=_prefix_env("OCR_LANGUAGES", "tr,en"))
     max_new_tokens: int = field(default_factory=_int_env("MAX_NEW_TOKENS", 256))
     max_upload_mb: int = field(default_factory=_int_env("MAX_UPLOAD_MB", 20))
     # Relative paths are resolved against the project root.
