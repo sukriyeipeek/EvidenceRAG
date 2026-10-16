@@ -90,6 +90,8 @@ class RAGPipeline:
             hybrid=self.settings.hybrid_search,
             candidates=self.settings.retrieval_candidates,
             keyword_weight=self.settings.keyword_weight,
+            reranker_model_name=self.settings.reranker_model_name,
+            rerank_candidates=self.settings.rerank_candidates,
         )
 
     def ask(self, question):

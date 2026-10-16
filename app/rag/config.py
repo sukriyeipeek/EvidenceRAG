@@ -66,6 +66,11 @@ class Settings:
     # equal weight, keyword matches pushed aside the right chunk for English questions
     # about Turkish documents, whose words the Turkish stemmer splits into noise.
     keyword_weight: float = field(default_factory=_float_env("KEYWORD_WEIGHT", 0.5))
+    # A cross-encoder that reorders the best candidates (see reranking.py); empty disables it.
+    # BAAI/bge-reranker-v2-m3 put every retrievable hard-set answer first but adds about
+    # 5 s per question on a CPU, so it is off by default.
+    reranker_model_name: str = field(default_factory=_prefix_env("RERANKER_MODEL_NAME", ""))
+    rerank_candidates: int = field(default_factory=_int_env("RERANK_CANDIDATES", 20))
     max_new_tokens: int = field(default_factory=_int_env("MAX_NEW_TOKENS", 256))
     max_upload_mb: int = field(default_factory=_int_env("MAX_UPLOAD_MB", 20))
     # Relative paths are resolved against the project root.
