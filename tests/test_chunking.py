@@ -58,3 +58,26 @@ def test_overlap_starts_at_a_word_boundary():
 
     for chunk in chunks:
         assert all(word in words for word in chunk["text"].split())
+
+
+def test_table_rows_become_chunks_with_their_column_names():
+    text = (
+        "# Bayi\n## Tablo\nÜrün tablosu:\n\n"
+        "| Ürün | İskonto | Depo |\n|---|:---:|---|\n"
+        "| Kırtasiye | %14 | İzmir |\n| Eldiven | %21 | |\n\nSon not."
+    )
+
+    chunks = chunk_documents([_page(text)])
+
+    assert [chunk["text"] for chunk in chunks] == [
+        "Bayi > Tablo: Ürün tablosu:",
+        "Bayi > Tablo: Ürün: Kırtasiye; İskonto: %14; Depo: İzmir",
+        "Bayi > Tablo: Ürün: Eldiven; İskonto: %21",
+        "Bayi > Tablo: Son not.",
+    ]
+
+
+def test_pipe_characters_outside_a_table_stay_prose():
+    chunks = chunk_documents([_page("a | b | c\nsonraki satır")])
+
+    assert [chunk["text"] for chunk in chunks] == ["a | b | c sonraki satır"]

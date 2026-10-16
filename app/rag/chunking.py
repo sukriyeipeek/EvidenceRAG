@@ -2,6 +2,8 @@ import re
 
 
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+# The row under a Markdown table's header: |---|:---:|---|
+TABLE_SEPARATOR = re.compile(r"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$")
 
 
 def chunk_documents(pages, chunk_size=800, chunk_overlap=100):
@@ -13,10 +15,6 @@ def chunk_documents(pages, chunk_size=800, chunk_overlap=100):
     chunks = []
     for page in pages:
         for headings, section_text in _split_sections(page["text"]):
-            text = _clean_text(section_text)
-            if not text:
-                continue
-
             # Every chunk carries its heading path, so a chunk from the middle of a
             # section still says which document and section it belongs to.
             prefix = " > ".join(headings)
@@ -24,15 +22,60 @@ def chunk_documents(pages, chunk_size=800, chunk_overlap=100):
             body_size = max(body_size, chunk_size // 2)
             overlap = min(chunk_overlap, body_size - 1)
 
-            for chunk_text in _split_text(text, body_size, overlap):
-                metadata = dict(page["metadata"])
-                metadata["chunk_id"] = f"{metadata['document_id']}-{len(chunks)}"
-                if headings:
-                    metadata["section"] = prefix
-                    chunk_text = f"{prefix}: {chunk_text}"
-                chunks.append({"text": chunk_text, "metadata": metadata})
+            for block in _split_tables(section_text):
+                text = _clean_text(block)
+                if not text:
+                    continue
+                for chunk_text in _split_text(text, body_size, overlap):
+                    metadata = dict(page["metadata"])
+                    metadata["chunk_id"] = f"{metadata['document_id']}-{len(chunks)}"
+                    if headings:
+                        metadata["section"] = prefix
+                        chunk_text = f"{prefix}: {chunk_text}"
+                    chunks.append({"text": chunk_text, "metadata": metadata})
 
     return chunks
+
+
+def _split_tables(text):
+    """Split text into prose blocks and one block per Markdown table row.
+
+    A table row on its own ("| Kırtasiye | %14 | 4 iş günü |") doesn't say what its
+    values are, so each row is rewritten with its column names: "Ürün grubu:
+    Kırtasiye; Bayi iskontosu: %14; ...". Rows become separate chunks, so a long table
+    isn't cut into pieces that lose the header row.
+    """
+    blocks = []
+    prose = []
+    lines = text.splitlines()
+    position = 0
+    while position < len(lines):
+        line = lines[position].strip()
+        is_table = (
+            line.startswith("|")
+            and position + 1 < len(lines)
+            and TABLE_SEPARATOR.match(lines[position + 1].strip())
+        )
+        if not is_table:
+            prose.append(lines[position])
+            position += 1
+            continue
+
+        blocks.append("\n".join(prose))
+        prose = []
+        header = _table_cells(line)
+        position += 2
+        while position < len(lines) and lines[position].strip().startswith("|"):
+            cells = _table_cells(lines[position].strip())
+            blocks.append("; ".join(f"{name}: {value}" for name, value in zip(header, cells) if value))
+            position += 1
+
+    blocks.append("\n".join(prose))
+    return blocks
+
+
+def _table_cells(line):
+    return [cell.strip() for cell in line.strip("|").split("|")]
 
 
 def _split_sections(text):
