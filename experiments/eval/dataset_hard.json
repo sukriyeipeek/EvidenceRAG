@@ -1,0 +1,52 @@
+{
+  "description": "Harder Turkish evaluation set. Same format as dataset.json, plus a 'type' on answerable questions naming what makes them hard: 'code' (an identifier such as E-1043), 'table' (the answer is in a table row), 'confusable' (a near-identical passage elsewhere gives a different answer), 'paraphrase' (worded differently from the document), 'prose' (plain text) and 'scanned' (in an image-only PDF that needs OCR). The six documents include the three from dataset.json as distractors.",
+  "documents": [
+    "data/raw/ornek_rapor.md",
+    "experiments/eval/corpus/mavi_korfez_2025.md",
+    "experiments/eval/corpus/izin_yonergesi.md",
+    "experiments/eval/corpus/e_belge_yonergesi.md",
+    "experiments/eval/corpus/bayi_kosullari.md",
+    "experiments/eval/corpus/taranmis_sayim_tutanagi.pdf"
+  ],
+  "questions": [
+    {"id": "kod-e1043", "category": "answerable", "type": "code", "question": "E-1043 hata kodu alırsam ne yapmalıyım?", "document": "e_belge_yonergesi.md", "evidence": "E-1043", "answer": [["24 saat"]]},
+    {"id": "kod-e1019", "category": "answerable", "type": "code", "question": "E-1019 kodu neyi ifade ediyor?", "document": "e_belge_yonergesi.md", "evidence": "E-1019", "answer": [["KDV"]]},
+    {"id": "kod-e1072", "category": "answerable", "type": "code", "question": "E-1072 hatasında ne yapılır?", "document": "e_belge_yonergesi.md", "evidence": "E-1072", "answer": [["ertesi gün"]]},
+    {"id": "kod-e1031", "category": "answerable", "type": "code", "question": "E-1031 hatasının anlamı nedir?", "document": "e_belge_yonergesi.md", "evidence": "E-1031", "answer": [["sertifika"]]},
+    {"id": "kod-e1058", "category": "answerable", "type": "code", "question": "Entegrasyon E-1058 döndürdü, sorun ne?", "document": "e_belge_yonergesi.md", "evidence": "E-1058", "answer": [["adres"]]},
+    {"id": "karis-iptal", "category": "answerable", "type": "confusable", "question": "e-Arşiv fatura kaç gün içinde iptal edilebilir?", "document": "e_belge_yonergesi.md", "evidence": "7 gün içinde iptal", "answer": [["7"]]},
+    {"id": "karis-itiraz", "category": "answerable", "type": "confusable", "question": "Alıcı bir e-Faturaya kaç gün içinde itiraz edebilir?", "document": "e_belge_yonergesi.md", "evidence": "8 gün içinde itiraz", "answer": [["8"]]},
+    {"id": "karis-hacim", "category": "answerable", "type": "confusable", "question": "Hacim indirimi yüzde kaç?", "document": "bayi_kosullari.md", "evidence": "hacim indirimi", "answer": [["2"]]},
+    {"id": "para-geri-alma", "category": "answerable", "type": "paraphrase", "question": "Kestiğim e-Arşiv faturayı geri almak için ne kadar sürem var?", "document": "e_belge_yonergesi.md", "evidence": "7 gün içinde iptal", "answer": [["7"]]},
+    {"id": "para-odeme-yapildi", "category": "answerable", "type": "paraphrase", "question": "Müşteri parayı ödediyse e-Arşiv faturayı iptal edebilir miyim?", "document": "e_belge_yonergesi.md", "evidence": "iade faturası", "answer": [["iade faturası"]]},
+    {"id": "para-arsiv-suresi", "category": "answerable", "type": "paraphrase", "question": "Faturaları kaç yıl arşivde tutmamız gerekiyor?", "document": "e_belge_yonergesi.md", "evidence": "10 yıl", "answer": [["10"]]},
+    {"id": "para-arsiv-talep", "category": "answerable", "type": "paraphrase", "question": "Arşivden istediğim bir belge en geç kaç iş gününde elime ulaşır?", "document": "e_belge_yonergesi.md", "evidence": "3 iş günü içinde karşılanır", "answer": [["3"]]},
+    {"id": "para-hasarli", "category": "answerable", "type": "paraphrase", "question": "Kırık gelen ürünü kaç gün içinde bildirmem lazım?", "document": "bayi_kosullari.md", "evidence": "Hasarlı ürünler", "answer": [["5"]]},
+    {"id": "tablo-adres", "category": "answerable", "type": "table", "question": "15.000 TL'nin üzerindeki e-Arşiv faturalarda açık adres yazmak gerekli mi?", "document": "e_belge_yonergesi.md", "evidence": "15.000 TL üzeri", "answer": [["zorunlu", "evet", "gerekli"]]},
+    {"id": "tablo-vkn", "category": "answerable", "type": "table", "question": "2.000 TL'ye kadar olan bir faturada vergi kimlik numarası gerekli mi?", "document": "e_belge_yonergesi.md", "evidence": "2.000 TL'ye kadar", "answer": [["isteğe bağlı", "gerekli değil", "zorunlu değil"]]},
+    {"id": "tablo-kirtasiye", "category": "answerable", "type": "table", "question": "Kırtasiye ürünlerinde bayi iskontosu yüzde kaç?", "document": "bayi_kosullari.md", "evidence": "Kırtasiye", "answer": [["14"]]},
+    {"id": "tablo-eldiven", "category": "answerable", "type": "table", "question": "Eldiven siparişleri hangi depodan sevk edilir?", "document": "bayi_kosullari.md", "evidence": "Eldiven", "answer": [["Bursa"]]},
+    {"id": "tablo-koltuk", "category": "answerable", "type": "table", "question": "Ofis koltuğunun teslim süresi ne kadar?", "document": "bayi_kosullari.md", "evidence": "Ofis koltuğu", "answer": [["15"]]},
+    {"id": "tablo-strec", "category": "answerable", "type": "table", "question": "Streç film için bayi iskontosu nedir?", "document": "bayi_kosullari.md", "evidence": "Streç film", "answer": [["7"]]},
+    {"id": "tablo-dezenfektan", "category": "answerable", "type": "table", "question": "Dezenfektan kaç iş gününde teslim edilir?", "document": "bayi_kosullari.md", "evidence": "Dezenfektan", "answer": [["3"]]},
+    {"id": "tablo-karton", "category": "answerable", "type": "table", "question": "Karton bardakta uygulanan iskonto oranı kaç?", "document": "bayi_kosullari.md", "evidence": "Karton bardak", "answer": [["16"]]},
+    {"id": "duz-odeme", "category": "answerable", "type": "prose", "question": "Bayiler sipariş bedelini kaç gün içinde ödemeli?", "document": "bayi_kosullari.md", "evidence": "45 gün", "answer": [["45"]]},
+    {"id": "duz-toplu-satis", "category": "answerable", "type": "prose", "question": "Toplu satışlarda e-Arşiv faturalar en geç ne zamana kadar düzenlenir?", "document": "e_belge_yonergesi.md", "evidence": "Toplu satışlarda", "answer": [["12:00", "12.00"]]},
+    {"id": "tarama-a4", "category": "answerable", "type": "scanned", "question": "Ankara deposundaki sayımda kaç koli A4 fotokopi kâğıdı bulundu?", "document": "taranmis_sayim_tutanagi.pdf", "evidence": "315", "answer": [["315"]]},
+    {"id": "tarama-eksik", "category": "answerable", "type": "scanned", "question": "Depo sayımında kaç koli tuvalet kâğıdı eksik çıktı?", "document": "taranmis_sayim_tutanagi.pdf", "evidence": "eksik", "answer": [["18"]]},
+    {"id": "tarama-tarih", "category": "answerable", "type": "scanned", "question": "Ankara deposundaki yıl sonu sayımı hangi tarihte yapıldı?", "document": "taranmis_sayim_tutanagi.pdf", "evidence": "mart", "answer": [["12 Mart"]]},
+
+    {"id": "yok-e1099", "category": "unanswerable_related", "question": "E-1099 hata kodu ne anlama geliyor?"},
+    {"id": "yok-irsaliye", "category": "unanswerable_related", "question": "e-İrsaliye kaç gün içinde iptal edilebilir?"},
+    {"id": "yok-kampanya", "category": "unanswerable_related", "question": "Kampanya döneminde kırtasiye iskontosu yüzde kaç oluyor?"},
+    {"id": "yok-depo-adres", "category": "unanswerable_related", "question": "İstanbul deposunun açık adresi nedir?"},
+    {"id": "yok-toner-sayim", "category": "unanswerable_related", "question": "Sayımda kaç koli toner bulundu?"},
+    {"id": "yok-genel-mudur", "category": "unanswerable_related", "question": "Kuzey Ticaret A.Ş.'nin genel müdürü kimdir?"},
+
+    {"id": "dis-hava", "category": "unanswerable_offtopic", "question": "Yarın İzmir'de hava nasıl olacak?"},
+    {"id": "dis-yumurta", "category": "unanswerable_offtopic", "question": "Bir yumurta kaç dakikada haşlanır?"},
+    {"id": "dis-baskent", "category": "unanswerable_offtopic", "question": "Türkiye'nin başkenti neresidir?"},
+    {"id": "dis-python", "category": "unanswerable_offtopic", "question": "En iyi Python web framework'ü hangisidir?"},
+    {"id": "dis-futbol", "category": "unanswerable_offtopic", "question": "Dünya Kupası'nı en çok hangi ülke kazandı?"}
+  ]
+}

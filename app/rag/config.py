@@ -19,6 +19,20 @@ def _int_env(name, default):
     return read
 
 
+def _bool_env(name, default):
+    def read():
+        value = os.getenv(name)
+        if not value:
+            return default
+        if value.lower() in ("1", "true", "yes", "on"):
+            return True
+        if value.lower() in ("0", "false", "no", "off"):
+            return False
+        raise ValueError(f"{name} must be true or false, got {value!r}")
+
+    return read
+
+
 def _float_env(name, default):
     def read():
         value = os.getenv(name)
@@ -44,6 +58,22 @@ class Settings:
     chunk_overlap: int = field(default_factory=_int_env("CHUNK_OVERLAP", 100))
     top_k: int = field(default_factory=_int_env("TOP_K", 5))
     relevance_threshold: float = field(default_factory=_float_env("RELEVANCE_THRESHOLD", 0.80))
+    # Combine the vector search with BM25 keyword search (see keyword_index.py).
+    hybrid_search: bool = field(default_factory=_bool_env("HYBRID_SEARCH", True))
+    # How many chunks each search proposes before the rankings are merged.
+    retrieval_candidates: int = field(default_factory=_int_env("RETRIEVAL_CANDIDATES", 30))
+    # Weight of the keyword ranking against the vector ranking when they are merged. At
+    # equal weight, keyword matches pushed aside the right chunk for English questions
+    # about Turkish documents, whose words the Turkish stemmer splits into noise.
+    keyword_weight: float = field(default_factory=_float_env("KEYWORD_WEIGHT", 0.5))
+    # A cross-encoder that reorders the best candidates (see reranking.py); empty disables it.
+    # BAAI/bge-reranker-v2-m3 put every retrievable hard-set answer first but adds about
+    # 5 s per question on a CPU, so it is off by default.
+    reranker_model_name: str = field(default_factory=_prefix_env("RERANKER_MODEL_NAME", ""))
+    rerank_candidates: int = field(default_factory=_int_env("RERANK_CANDIDATES", 20))
+    # EasyOCR language codes for PDF pages that have no text layer, comma-separated;
+    # empty disables OCR and such documents are rejected as empty.
+    ocr_languages: str = field(default_factory=_prefix_env("OCR_LANGUAGES", "tr,en"))
     max_new_tokens: int = field(default_factory=_int_env("MAX_NEW_TOKENS", 256))
     max_upload_mb: int = field(default_factory=_int_env("MAX_UPLOAD_MB", 20))
     # Relative paths are resolved against the project root.

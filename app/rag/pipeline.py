@@ -44,6 +44,7 @@ class RAGPipeline:
             path,
             filename=filename,
             source=source or filename,
+            ocr_languages=[code.strip() for code in self.settings.ocr_languages.split(",") if code.strip()],
         )
         chunks = chunk_documents(
             pages,
@@ -76,16 +77,26 @@ class RAGPipeline:
     def delete_document(self, document_id):
         return self.vector_store.delete_document(document_id)
 
-    def ask(self, question):
-        evidence = retrieve(
+    def find_evidence(self, question, relevance_threshold=None):
+        if relevance_threshold is None:
+            relevance_threshold = self.settings.relevance_threshold
+        return retrieve(
             question,
             self.vector_store,
             top_k=self.settings.top_k,
-            relevance_threshold=self.settings.relevance_threshold,
+            relevance_threshold=relevance_threshold,
             embedding_function=self.embedding_function,
             embedding_model_name=self.settings.embedding_model_name,
             query_prefix=self.settings.embedding_query_prefix,
+            hybrid=self.settings.hybrid_search,
+            candidates=self.settings.retrieval_candidates,
+            keyword_weight=self.settings.keyword_weight,
+            reranker_model_name=self.settings.reranker_model_name,
+            rerank_candidates=self.settings.rerank_candidates,
         )
+
+    def ask(self, question):
+        evidence = self.find_evidence(question)
         if not evidence:
             return _insufficient_evidence()
 

@@ -28,8 +28,8 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(PROJECT_DIRECTORY / ".env")
 
 from app.rag.config import Settings  # noqa: E402
+from app.rag.document_loader import DocumentError  # noqa: E402
 from app.rag.pipeline import INSUFFICIENT_EVIDENCE, RAGPipeline  # noqa: E402
-from app.rag.retrieval import retrieve  # noqa: E402
 
 
 ANSWERABLE = ("answerable", "answerable_english")
@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--threshold", type=float, help="override RELEVANCE_THRESHOLD")
     parser.add_argument("--top-k", type=int, help="override TOP_K")
     args = parser.parse_args()
+    args.dataset = args.dataset.resolve()
 
     settings = Settings()
     overrides = {"relevance_threshold": args.threshold, "top_k": args.top_k}
@@ -54,16 +55,27 @@ def main():
     print(f"Threshold: {settings.relevance_threshold}  top_k: {settings.top_k}  questions: {len(questions)}\n")
 
     pipeline = RAGPipeline(settings=settings)
+    skipped = []
     for document in dataset["documents"]:
-        pipeline.index_file(PROJECT_DIRECTORY / document)
-    print(f"Indexed {len(dataset['documents'])} documents, {len(pipeline.vector_store.chunks)} chunks\n")
+        try:
+            pipeline.index_file(PROJECT_DIRECTORY / document)
+        except DocumentError as exc:
+            # The app rejects such a document at upload; here its questions just score as misses.
+            skipped.append({"document": document, "error": str(exc)})
+            print(f"Skipped {document}: {exc}")
+    indexed = len(dataset["documents"]) - len(skipped)
+    print(f"Indexed {indexed} documents, {len(pipeline.vector_store.chunks)} chunks\n")
 
     rows = [_retrieval_row(question, pipeline) for question in questions]
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "settings": dataclasses.asdict(settings),
         "dataset": str(args.dataset.relative_to(PROJECT_DIRECTORY)),
+        "skipped_documents": skipped,
+        "chunks": len(pipeline.vector_store.chunks),
         "retrieval": _retrieval_metrics(rows),
+        "retrieval_by_type": _retrieval_metrics_by_type(rows),
+        "retrieval_seconds": _median_seconds(rows),
         "threshold_sweep": _threshold_sweep(rows, settings.relevance_threshold),
     }
     _print_retrieval(report, rows, settings)
@@ -83,21 +95,17 @@ def main():
 
 
 def _retrieval_row(question, pipeline):
-    settings = pipeline.settings
-    results = retrieve(
-        question["question"],
-        pipeline.vector_store,
-        top_k=settings.top_k,
-        relevance_threshold=float("-inf"),
-        embedding_function=pipeline.embedding_function,
-        embedding_model_name=settings.embedding_model_name,
-        query_prefix=settings.embedding_query_prefix,
-    )
+    started = time.perf_counter()
+    results = pipeline.find_evidence(question["question"], relevance_threshold=float("-inf"))
     row = {
         "id": question["id"],
         "category": question["category"],
+        "type": question.get("type"),
         "question": question["question"],
-        "top_score": results[0]["score"] if results else None,
+        "retrieval_seconds": round(time.perf_counter() - started, 3),
+        # The threshold keeps or drops each result on its own score, so whether anything
+        # survives depends on the best score, not on the score of the first result.
+        "top_score": max(result["score"] for result in results) if results else None,
         "rank": None,
         "relevant_score": None,
     }
@@ -115,16 +123,31 @@ def _retrieval_metrics(rows):
     metrics = {}
     for category in ANSWERABLE:
         selected = [row for row in rows if row["category"] == category]
-        if not selected:
-            continue
-        ranks = [row["rank"] for row in selected]
-        metrics[category] = {
-            "count": len(selected),
-            "hit_at_1": _share(rank == 1 for rank in ranks),
-            "hit_at_k": _share(rank is not None for rank in ranks),
-            "mrr": round(sum(1 / rank for rank in ranks if rank) / len(ranks), 3),
-        }
+        if selected:
+            metrics[category] = _rank_metrics(selected)
     return metrics
+
+
+def _retrieval_metrics_by_type(rows):
+    types = sorted({row["type"] for row in rows if row["category"] in ANSWERABLE and row["type"]})
+    return {
+        question_type: _rank_metrics([row for row in rows if row["type"] == question_type])
+        for question_type in types
+    }
+
+
+def _rank_metrics(rows):
+    ranks = [row["rank"] for row in rows]
+    return {
+        "count": len(rows),
+        "hit_at_1": _share(rank == 1 for rank in ranks),
+        "hit_at_k": _share(rank is not None for rank in ranks),
+        "mrr": round(sum(1 / rank for rank in ranks if rank) / len(ranks), 3),
+    }
+
+
+def _median_seconds(rows):
+    return round(statistics.median(row["retrieval_seconds"] for row in rows), 3)
 
 
 def _threshold_sweep(rows, current):
@@ -196,11 +219,12 @@ def _answer_metrics(rows):
         selected = [row for row in rows if row["category"] == category]
         if selected:
             outcomes = [row["outcome"] for row in selected]
-            metrics[category] = {
-                "count": len(selected),
-                **{outcome: outcomes.count(outcome) for outcome in sorted(set(outcomes))},
-                "accuracy": _share(outcome == "correct" for outcome in outcomes),
-            }
+            metrics[category] = _outcome_counts(selected)
+    types = sorted({row["type"] for row in rows if row["category"] in ANSWERABLE and row["type"]})
+    metrics["by_type"] = {
+        question_type: _outcome_counts([row for row in rows if row["type"] == question_type])
+        for question_type in types
+    }
     metrics["verification"] = {
         "answers_checked": len(answered),
         "with_unsupported_numbers": sum(bool(row["verification"]["unsupported_numbers"]) for row in answered),
@@ -212,6 +236,19 @@ def _answer_metrics(rows):
         statistics.median(row["seconds"] for row in llm_rows) if llm_rows else None
     )
     return metrics
+
+
+def _outcome_counts(rows):
+    outcomes = [row["outcome"] for row in rows]
+    return {
+        "count": len(rows),
+        **{outcome: outcomes.count(outcome) for outcome in sorted(set(outcomes))},
+        "accuracy": _share(outcome == "correct" for outcome in outcomes),
+    }
+
+
+def _format_share(value):
+    return "-" if value is None else f"{value:.2f}"
 
 
 def _share(flags):
@@ -226,6 +263,14 @@ def _print_retrieval(report, rows, settings):
             f"  {category:<20} n={metrics['count']:<3} hit@1={metrics['hit_at_1']:.2f}  "
             f"hit@{settings.top_k}={metrics['hit_at_k']:.2f}  MRR={metrics['mrr']:.2f}"
         )
+    if report["retrieval_by_type"]:
+        print("  by question type:")
+        for question_type, metrics in report["retrieval_by_type"].items():
+            print(
+                f"    {question_type:<18} n={metrics['count']:<3} hit@1={metrics['hit_at_1']:.2f}  "
+                f"hit@{settings.top_k}={metrics['hit_at_k']:.2f}  MRR={metrics['mrr']:.2f}"
+            )
+    print(f"  median retrieval time: {report['retrieval_seconds']:.3f} s per question")
     misses = [row for row in rows if row["category"] in ANSWERABLE and row["rank"] != 1]
     for row in misses:
         print(f"    rank={row['rank']}  {row['id']}: {row['question']}")
@@ -236,8 +281,9 @@ def _print_retrieval(report, rows, settings):
     for entry in sweep["sweep"]:
         marker = "  <- current" if entry["threshold"] == round(settings.relevance_threshold, 2) else ""
         print(
-            f"  {entry['threshold']:<9.2f}  {entry['answerable_kept']:<15.2f}  {entry['english_kept']:<12.2f}  "
-            f"{entry['offtopic_rejected']:<17.2f}  {entry['related_rejected']:.2f}{marker}"
+            f"  {entry['threshold']:<9.2f}  {_format_share(entry['answerable_kept']):<15}  "
+            f"{_format_share(entry['english_kept']):<12}  {_format_share(entry['offtopic_rejected']):<17}  "
+            f"{_format_share(entry['related_rejected'])}{marker}"
         )
     print(
         f"  lowest relevant score {sweep['lowest_relevant_score']:.3f}, "
@@ -256,6 +302,11 @@ def _print_answers(metrics, rows):
             values = metrics[category]
             details = ", ".join(f"{k}={v}" for k, v in values.items() if k not in ("count", "accuracy"))
             print(f"  {category:<22} n={values['count']:<3} accuracy={values['accuracy']:.2f}  ({details})")
+    if metrics["by_type"]:
+        print("  by question type:")
+        for question_type, values in metrics["by_type"].items():
+            details = ", ".join(f"{k}={v}" for k, v in values.items() if k not in ("count", "accuracy"))
+            print(f"    {question_type:<20} n={values['count']:<3} accuracy={values['accuracy']:.2f}  ({details})")
     verification = metrics["verification"]
     print(
         f"  verification: {verification['answers_checked']} answers checked, "
