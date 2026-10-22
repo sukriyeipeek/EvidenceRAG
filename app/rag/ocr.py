@@ -1,12 +1,13 @@
 import io
-from functools import lru_cache
+from .runtime import SingleFlightCache
+
+_cache = SingleFlightCache(maxsize=2)
 
 
 class OCRUnavailableError(RuntimeError):
     """Raised when OCR is needed but the easyocr package is not installed."""
 
 
-@lru_cache(maxsize=2)
 def get_reader(languages):
     try:
         # Imported lazily: easyocr loads torch and its models take seconds to start.
@@ -16,7 +17,7 @@ def get_reader(languages):
         raise OCRUnavailableError("Reading scanned pages needs the easyocr package") from exc
 
     # The first call downloads the text detection and recognition models (about 100 MB).
-    return easyocr.Reader(list(languages), gpu=torch.cuda.is_available(), verbose=False)
+    return _cache.get(tuple(languages), lambda: easyocr.Reader(list(languages), gpu=torch.cuda.is_available(), verbose=False))
 
 
 def read_page_images(page, languages=("tr", "en")):

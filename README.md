@@ -1,5 +1,15 @@
 # EvidenceRAG
 
+Güncel `main` retrieval/BM25/Markdown/OCR davranışı ile T02–T11 güvenilirlik zincirini birleştiren inceleme adayı. [PR incelemesi ve doğrulama sınırları](docs/PR_REVIEW_2026-10-22.md).
+
+### Yanıt teşhisi sözleşmesi
+
+`/ask` ve doğrudan `RAGPipeline.ask` çıktısı eski `answer/sources/verification` alanlarına ek olarak `diagnostics` sürüm 1 taşır. `reason`: `answered`, `retrieval_no_evidence`, `model_no_evidence`, `input_limit`, `busy`, `model_error` veya `request_error`; hatalar HTTP durumlarını korur. `generation_invoked` gerçek generator callable girişinde true olur; loader/token bütçesi reddi false kalır.
+
+`timings_ms` monotonic milisaniyedir: `total`, `queue`, `model_load`, `query_embedding`, `retrieval`, `generation`, `verification`. Çalışmayan aşama null, çalışan sıfır süre 0'dır. Retrieval query embedding'i, embedding de soğuk yüklemeyi kapsayabilir; alt süreler toplam request'e eklenmez. Generation yalnız callable süresidir; load ve token kontrolünü kapsamaz. Total yanıtın ağdan istemciye ulaşmasını ölçmez. Queue reddi/iptali ve çalışan işte istemci iptali `admission_state` ile ayrılır; iptal native işi sonlandırmaz.
+
+Rastgele `request_id`, T06 model/tokenizer/index kimliği, prompt/source SHA ve runtime sürümleri içerik saklamadan teşhis sağlar. Statik kaynak/sürüm bilgisi proses başına cache'lenir; sorgu başına shell çalışmaz. Varsayılan log yalnız request ID, reason, invocation, admission state ve süreleri içerir; soru/cevap/belge/anahtar loglanmaz. Bu alanlar semantik doğruluk veya gerçek model performansı iddiası değildir.
+
 EvidenceRAG, kullanıcının yüklediği dokümanlardan kanıt parçaları getirerek soruları yanıtlayan basit bir Retrieval-Augmented Generation (RAG) uygulamasıdır. Yanıt üretirken yalnızca retrieval sonucundaki parçalar kullanılır ve kullanılan chunk kaynakları yanıtla birlikte döndürülür.
 
 ## Nasıl çalışır?
@@ -7,15 +17,13 @@ EvidenceRAG, kullanıcının yüklediği dokümanlardan kanıt parçaları getir
 ```text
 PDF / TXT / MD
     ↓
-Metin çıkarma (metin katmanı olmayan PDF sayfalarında OCR)
+Metin çıkarma ve temizleme
     ↓
-Başlık yolu eklenmiş, bölüm sınırından bölünmüş chunk'lar; tablo satırları ayrı chunk
+Overlap'li chunk'lar
     ↓
 Çok dilli E5 embedding (query: / passage: ön ekleri)
     ↓
-FAISS cosine araması + BM25 kelime araması → ağırlıklı RRF ile birleştirme
-    ↓
-(İsteğe bağlı) cross-encoder reranker
+FAISS cosine similarity araması
     ↓
 Relevance threshold ile kanıt seçimi
     ↓
@@ -26,9 +34,7 @@ Yerel instruct LLM (Qwen2.5, chat formatı)
 Yanıt ve kaynak chunk'ları
 ```
 
-Markdown dokümanlarda her chunk, üstündeki başlıkların yoluyla başlar (`Rapor > Bütçe: ...`); böylece bir bölümün ortasından gelen chunk bile hangi doküman ve bölüme ait olduğunu söyler. Markdown tablolarının her satırı, sütun adlarıyla yazılmış ayrı bir chunk olur (`Ürün grubu: Kırtasiye; Bayi iskontosu: %14; ...`).
-
-PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Index, chunk'lar ve doküman kayıtları `data/index/store.npz` dosyasına kaydedilir ve uygulama yeniden başlatıldığında otomatik yüklenir. Dosya her değişiklikte tek adımda yerine yazılır; yazma yarıda kesilirse önceki kayıt bozulmaz.
+PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte metadata olarak korunur. Index, chunk'lar ve doküman kayıtları `data/index/store.npz` dosyasına kaydedilir ve uygulama yeniden başlatıldığında otomatik yüklenir. Yeni candidate state kaydedilip replace edilmeden canlı index'e yayımlanmaz. Commit öncesi kayıt hatası eski RAM/disk durumunu korur; commit sonrası durability belirsizliği ayrı hata olarak bildirilir. Bu sözleşme ölçülmüş power-loss dayanıklılığı değildir.
 
 ## Kurulum
 
@@ -36,10 +42,12 @@ PDF sayfa numaraları; dosya adı, document id, source ve chunk id ile birlikte 
 python -m venv .venv
 # Windows PowerShell
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
 ```
 
-İlk embedding ve LLM kullanımı, ilgili Hugging Face modellerini indirir (embedding ~470 MB, LLM ~3 GB). Model GPU yoksa CPU'da float32 olarak çalışır; tipik bir dizüstü işlemcide bir cevap 10–30 saniye sürer, ilk soru model yüklemesi nedeniyle daha uzun sürer. Model adlarını veya RAG ayarlarını environment variable ile ya da proje kökündeki bir `.env` dosyasıyla değiştirebilirsiniz (`.env.example` dosyasını kopyalayıp düzenleyin; ortamda zaten tanımlı değişkenler `.env`'deki değerlerden önceliklidir):
+Lock hedefi Windows x64 / CPython 3.12'dir; temiz kurulum Windows 11/Python 3.12.10 üzerinde doğrulanır. Runtime lock 53, test lock 59 çözülmüş dağıtımın gerçek wheel SHA-256 değerlerini taşır. `requirements.txt` runtime doğrudan girdisi, `requirements-dev.txt` ona ek pytest/httpx2 test girdisidir; doğrudan sürümler korunur. Linux/macOS/ARM için bu tek-platform hash dosyaları doğrulanmış kurulum iddiası taşımaz. Kullanılan producer pip 25.0.1'dir; model ağırlıkları lock'a dahil değildir.
+
+İlk gerçek embedding/LLM kullanımı cache yoksa pinli Hugging Face artifact'ını indirebilir; test lane'leri offline'dır ve ağırlık indirmez. Model GPU yoksa CPU float32 kullanır; gerçek inference gecikmesi/kapasitesi bu teslimde ölçülmedi. Model adlarını veya RAG ayarlarını environment variable ile ya da proje kökündeki `.env` dosyasıyla değiştirebilirsiniz (`.env.example` dosyasını kopyalayıp düzenleyin; ortamda zaten tanımlı değerler önceliklidir):
 
 | Değişken | Varsayılan | Açıklama |
 | --- | --- | --- |
@@ -51,27 +59,74 @@ pip install -r requirements.txt
 | `CHUNK_OVERLAP` | `100` | Ardışık chunk'lar arasındaki karakter overlap'i |
 | `TOP_K` | `5` | Retrieval sonucundaki maksimum chunk sayısı |
 | `RELEVANCE_THRESHOLD` | `0.80` | Normalize embedding'lerde cosine similarity alt sınırı |
-| `HYBRID_SEARCH` | `true` | Vektör aramasını BM25 kelime aramasıyla birleştirir |
-| `RETRIEVAL_CANDIDATES` | `30` | Birleştirmeden önce her aramanın önerdiği chunk sayısı |
-| `KEYWORD_WEIGHT` | `0.5` | Birleştirmede BM25 listesinin vektör listesine göre ağırlığı |
-| `RERANKER_MODEL_NAME` | boş (kapalı) | Cross-encoder reranker modeli, ör. `BAAI/bge-reranker-v2-m3` (~2.3 GB, CPU'da soru başına ~5 sn) |
-| `RERANK_CANDIDATES` | `20` | Reranker'ın aralarından seçtiği aday chunk sayısı |
-| `OCR_LANGUAGES` | `tr,en` | Metin katmanı olmayan PDF sayfaları için EasyOCR dilleri; boş bırakılırsa OCR kapanır |
 | `MAX_NEW_TOKENS` | `256` | LLM yanıt uzunluğu sınırı |
 | `MAX_UPLOAD_MB` | `20` | Yüklenebilecek en büyük doküman boyutu; aşan dosyalar `413` ile reddedilir |
 | `INDEX_DIR` | `data/index` | Kalıcı index'in tutulduğu klasör (göreli yollar proje köküne göre) |
 
-`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın. Hibrit arama ve reranker sıralamayı değiştirir ama eşik her zaman cosine skoruna uygulanır; yalnızca kelime eşleşmesiyle alakasız bir chunk kanıt sayılmaz.
+### Girdi ve store bütçeleri
 
-Taranmış bir PDF'in ilk yüklemesi, EasyOCR modellerini indirir (~100 MB); CPU'da bir sayfa ~8 saniyede okunur. OCR ile okunan chunk'ların metadata'sında `"ocr": true` bulunur.
+Bu sınırlar yerel, tek sahibi olan ve tek prosesli kullanım için değiştirilebilir başlangıç politikasıdır; ölçülmüş güvenli kapasite veya gecikme garantisi değildir. Pozitif tam sayı gerekir; chunk overlap değeri `0 <= CHUNK_OVERLAP < CHUNK_SIZE` olmalıdır. Geçersiz ayarlar başlangıçta hata verir.
+
+| Ayar | Varsayılan | Kapsam / birim |
+| --- | --- | --- |
+| `MAX_UPLOAD_MB` | `20` | Dosya içeriği, MiB (`1 MiB = 1.048.576 bayt`); eski ayar korunur |
+| `MAX_UPLOAD_BYTES` | `MAX_UPLOAD_MB * 1.048.576` | İsteğe bağlı kesin bayt sınırı; verilirse MiB ayarını geçersiz kılar |
+| `MAX_HTTP_BODY_BYTES` | `21037056` | POST `/documents` toplam gövdesi: 20 MiB + 64 KiB multipart framing/başlık payı |
+| `MAX_JSON_BODY_BYTES` | `32768` | POST `/ask` toplam JSON gövdesi, bayt |
+| `MAX_MULTIPART_HEADER_BYTES` | `8192` | Parça başına başlık adları/değerleri ve normalize `: ` / CRLF ayraçları için bayt bütçesi |
+| `MAX_FILENAME_BYTES` | `512` | Dosya adının UTF-8 bayt uzunluğu |
+| `MAX_QUESTION_CHARS` | `4000` | Soru karakterleri, çevre boşlukları dahil; token sınırı değildir |
+| `MAX_PDF_PAGES` | `500` | PDF başına sayfa |
+| `MAX_TEXT_CHARS` | `2000000` | Belgedeki bütün sayfalardan çıkarılan toplam metin karakteri |
+| `MAX_DOCUMENT_CHUNKS` | `2000` | Belge başına üretilen chunk |
+| `MAX_STORE_CHUNKS` | `20000` | Store toplam chunk sayısı |
+| `MAX_STORE_TEXT_BYTES` | `67108864` | Store'daki chunk metinlerinin toplam UTF-8 baytı (64 MiB); overlap tekrarları da sayılır |
+
+Upload yalnız `file` adlı tek dosya parçası kabul eder; ek dosya veya form alanı reddedilir. Dosya baytlarıyla toplam HTTP gövdesi ayrı sınırlardır. Bilinen aşırı `Content-Length` parser başlamadan reddedilir. Başlık yoksa veya gerçeği yansıtmıyorsa ASGI `receive` üzerinden sayılan toplam kullanılır; bütçeyi aşan chunk parser'a verilmez ve başka body chunk'ı istenmez. Limit içinde alınan önceki parçalar parse edilmiş veya diske spool edilmiş olabilir. Kısmi, tamamlanmamış ve başarısız upload kaynakları kapatılır. Bu sayaç sunucunun önceden belleğe aldığı tek ASGI chunk'ının boyutunu sınırlamaz; genel HTTP sunucu/header veya proxy sınırlarının yerine geçmez.
+
+TXT/MD en çok metin limiti + 1 karakter okunarak kontrol edilir. PDF sayfa sayısı çıkarımdan önce, toplam metin ise her sayfa çıkarımından sonra kontrol edilir. Pypdf decoder korumaları değiştirilmez. `extract_text()` içindeki tepe CPU/RAM, page-tree dolaşımı ve dosya açma maliyeti için sert sınır sağlanmaz; thread timeout'u veya ayrı extraction prosesi eklenmemiştir. Chunk üretimi limitte durur; tüm sınırsız chunk listesi önce üretilmez. Erken dosya/metin/sayfa/chunk reddi embedding veya store mutasyonu başlatmaz.
+
+Store kotası embedding öncesi kontrol edilir, ardından mutasyon kilidi altında yeniden denetlenir; yarış nedeniyle son kontrolde ret olursa embedding zaten yapılmış olabilir, ancak reddedilen belge RAM/disk durumuna eklenmez. 64 MiB yeni toplam metin başlangıç bütçesidir; vektörler, metadata, NPZ veya proses RSS boyutunu ölçmez. Mevcut bir index yeni kotanın üstündeyse sessizce silinmez/rebuild edilmez; okuma/silme kullanılabilir, kota içi duruma dönene kadar yeni ekleme reddedilir. Kayıt hatalarında transaction/rollback garantisi bu limit kontrolünden ayrı bir konudur.
+
+HTTP hata biçimi `detail` alanını korur: gövde/dosya/metin/sayfa/chunk/store ve başlık/filename aşımı `413`; soru karakter sınırı API modelinde `422`; boş/geçersiz belge veya fazladan multipart parça `400`; duplicate içerik `409`. Doğrudan `pipeline.ask/index_file` çağrısı limit aşımında `InputLimitError` yükseltir. Hiçbir limit sessiz kırpma yapmaz. Upload MiB veya bayt ayarını artırırken ayrı HTTP gövde bütçesi de bilinçli seçilmelidir. Prompt token bütçesi ve aktif/bekleyen model işlerinin sınırları bu görevin kapsamında değildir.
+
+`RELEVANCE_THRESHOLD`, normalize edilmiş FAISS inner product değeridir; bu nedenle cosine similarity olarak yorumlanır. Eşik embedding modeline özgüdür: E5 modelleri skorları dar bir aralıkta (yaklaşık 0.75–0.90) üretir. 0.80 değeri `data/raw/ornek_rapor.md` üzerindeki küçük bir Türkçe soru setiyle seçildi (ilgili sorular ≥ 0.80, konu dışı sorular ≤ 0.79). Embedding modelini değiştirirseniz eşiği de yeniden ayarlayın.
 
 ## Çalıştırma
 
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --host 127.0.0.1 --no-proxy-headers --reload
 ```
 
 Sunucu başladıktan sonra web arayüzünü `http://127.0.0.1:8000/` adresinden, Swagger API ekranını ise `http://127.0.0.1:8000/docs` adresinden açabilirsiniz. Web arayüzü doküman yükleme, soru sorma, cevap gösterme ve kaynakları okunabilir kartlar halinde listeleme işlemlerini içerir.
+
+### Ağır model işleri ve readiness
+
+LLM generation ve embedding inference ayrıca kendi model-kullanım mutex'ini çağrı gerçekten dönene kadar tutar; global kapasiteyi yükseltmek aynı adapter nesnesinin eşzamanlı kullanımına izin vermez.
+
+`MAX_ACTIVE_HEAVY_JOBS=1` generation, query/index embedding ve cold loader için ortak proses-içi kapasitedir. Ask/index pipeline işleri bu iznin sahibidir; alt çağrılar yeniden izin beklemez. Doğrudan loader/embedding/generation çağrıları da aynı sınırı kullanır. Kilit sırası kapasite → loader cache → kısa store işlemleridir; store kilidini tutarak kapasite beklenmez.
+
+Bekleyen toplam iş `MAX_WAITING_HEAVY_JOBS=2` ile sınırlıdır. Global FIFO içinde ask/index/diğer model işi sayıları ayrıca `ASK_QUEUE_CAPACITY=2`, `INDEX_QUEUE_CAPACITY=2`, `MODEL_QUEUE_CAPACITY=2` ile sınırlandırılır. `HEAVY_WAIT_SECONDS=30` yalnız kuyruk bekleme süresidir; dolu/kapanan kuyruk veya süresi dolan bekleme `503`, `Retry-After: 1` ve açıklayıcı `detail` verir. Async admission ortak threadpool'u bloke etmez; native işler ayrı, kapasite kadar worker'ı olan executor'da çalışır. Health/belge listesi ağır kuyruğa girmez.
+
+İstemci iptali kuyruktaysa iş çıkarılır. İş başladıysa thread gerçekten bitene kadar hem global izin hem isteğe ait upload dosyaları korunur; iptal bu bekleyişten sonra bildirilir. Hata izin sızıntısı bırakmaz. Thread için sert sonlandırma/gerçek inference timeout'u yoktur; takılan native iş proses sonlanana dek sürebilir. Bu sınırlar RSS/p95 veya gösterilmemiş KV-cache arızalarının giderildiği garantisi değildir.
+
+Default yükleme lazy'dir: startup model indirmez; `/health` içindeki `model_readiness: lazy` modelin yüklü olduğunu söylemez. `PRELOAD_MODELS=true` açık opt-in'dir; lifecycle loading/ready/failed durumunu izler, preload hatası startup'ı durdurur. Cache aynı model+revision anahtarı için tek başarılı kurucu yayınlar; ilk hata cache'e yazılmaz ve tekrar denenebilir. Revision kimlikleri ayrı model kimliği görevinin konusudur; burada SHA uydurulmaz.
+
+Gerçek generation öncesinde tokenizer'ın `apply_chat_template` çıktısı bütün system/soru/kanıt tokenlarını ve `MAX_NEW_TOKENS` cevap rezervini kapsayarak gerçek model/tokenizer context sınırıyla karşılaştırılır. Aşım `InputLimitError` / HTTP `413` verir; soru/kanıt sessiz kesilmez. Query embedding bu kontrolden önce yapılmış olabilir. Char limiti token limiti değildir. İsteğe bağlı pozitif `TORCH_NUM_THREADS` ilk model yüklemesinden önce bir kez uygulanır; belirtilmezse host env/default thread ayarları değiştirilmez.
+
+### Yerel erişim sınırı
+
+`ACCESS_PROFILE=local` varsayılan ve desteklenen tek profildir. `shared`, `public` veya başka bir değer başlangıçta hata verir; bir API key eklemek bunları etkinleştirmez. Public/LAN yayın, reverse proxy ve çok kullanıcı/tenant izolasyonu bu sürümde desteklenmez. Aynı makinedeki diğer proseslere karşı kullanıcı kimlik doğrulaması sağlanmaz; bütün yerel istemciler aynı store'u kullanır.
+
+Launcher loopback'e bağlanır ve proxy başlıklarından peer türetmez. Uygulama ayrıca her HTTP isteğinde gerçek ASGI peer'inin loopback IP olmasını ve tek bir geçerli Host başlığını ister. Host allowlist `localhost`, `127.0.0.1`, köşeli parantezli `[::1]` ve bunların 1–65535 port varyantlarıdır. IPv6 kullanacaksanız aynı launcher'da `--host ::1` seçip `http://[::1]:8000/` açabilirsiniz. `localhost.evil.example`, userinfo, eksik/çoklu Host veya bozuk port kabul edilmez. Host kontrolü socket binding veya auth yerine geçmez.
+
+POST/DELETE gibi mutasyonlarda Origin varsa scheme/host/etkin port olarak isteğin origin'i ile tam eşleşmelidir. `null`, başka port/host, birden fazla Origin veya URL path'i içeren Origin reddedilir. `localhost` ile `127.0.0.1` aynı origin sayılmaz. Origin göndermeyen doğrudan yerel CLI istemcisi kabul edilir; örneğin `curl http://127.0.0.1:8000/health` ve yukarıdaki JSON/multipart örnekleri çalışır. Origin taklit edilebilir; bu kontrol auth değildir. CORS wildcard eklenmez.
+
+`Forwarded`, `X-Forwarded-For/Host/Proto/Port` ve `X-Real-IP` başlıkları değerlerine güvenilmeden reddedilir. Uzak peer, sahte localhost Host/Origin ile yerel kabul edilmez. Başlıkları kaldıran yerel bir reverse proxy'nin arkasındaki gerçek istemciyi uygulama ayırt edemez; bu nedenle proxy arkasında yerel erişim garantisi verilmez ve o dağıtım desteklenmez.
+
+Host/proxy hataları `400`, uzak peer veya uygun olmayan mutasyon Origin'i `403` ve mevcut `detail` biçimiyle döner; kontrol body parser, spool ve model/store işinden önce çalışır. `/`, `/static`, `/docs`, `/openapi.json`, `/health` ve belge/soru uçları aynı peer/Host sınırına tabidir. GET/HEAD/OPTIONS için Origin şartı yoktur. `/docs` yerelde açıktır; onu kapatmak erişim korumasının yerine geçmez. UI doğrulama hatalarını metin olarak gösterir; anahtar akışı veya browser storage eklenmemiştir.
+
+Belge metni ve dosya adı prompt'ta JSON verisi olarak serileştirilir; yeni satır, alıntı, kontrol ve `<...>` rol/delimiter işaretleri escape edilir. Soru aynı user rolünde ayrı serileştirilir; system rolü yalnız uygulama protokolünü taşır. Kaynak komutları atıf/ret protokolünü değiştiremez şeklinde açık sistem talimatı vardır. Bu, gerçek modelin kötü niyetli talimata uymayacağını kanıtlamaz; NO_EVIDENCE tam yanıt sözleşmesi ve semantik doğrulama sınırlamaları korunur. Dar serializer/DOM-stub testleri genel prompt-injection veya XSS denetimi değildir.
 
 ### Sağlık kontrolü
 
@@ -97,9 +152,39 @@ curl -X DELETE http://127.0.0.1:8000/documents/<document_id>
 
 Silinen dokümanın chunk'ları index'ten çıkarılır ve artık kanıt olarak kullanılmaz. Web arayüzündeki "Yüklü dokümanlar" listesi de aynı işlemleri yapar.
 
+### Kayıt işlemi ve servis lease'i
+
+Servis kalıcı indeksi modül importunda yüklemez; lease alındıktan sonra son committed dosyayı yeniden okur ve ancak başarılı yükleme/preload sonrası istek kabul eder. Böylece önceki servisin import ile startup arasında tamamladığı kayıtlar korunur. Bozuk/uyumsuz dosyada startup başarısız olur ve lease bırakılır; dosya değiştirilmez. Standalone constructor varsayılan otomatik okumasını korur.
+
+Add/delete aynı mutasyon kilidi altında candidate FAISS index'i, chunk listesi ve belge kayıtlarını oluşturur; quota/duplicate kontrolleri aynı kritik bölümdedir. Candidate hedefle aynı dizindeki benzersiz temporary NPZ'ye yazılır, file flush/fsync yapılır; `os.replace` görünürlük commit noktasıdır. Sonrasında tek state pointer'ı RAM'e yayımlanır. Açma/serialization/yazma/file-fsync/replace öncesi hata `not_committed` durumudur; eski RAM, arama, duplicate kontrolü ve reload korunur. Geçici dosya normal başarı/hata yollarında temizlenir; hedef dosya recovery bahanesiyle silinmez.
+
+Replace sonrası directory sync hatası `durability_uncertain` verir: işlem görünür olabilir; temiz rollback veya normal başarı ack'i sayılmaz. API `500` yanıtında string `detail`, `operation_id` ve `commit_status` döndürür. Kör retry yapmadan belge listesini ve `/health.store_operation_id` değerini kontrol edin. Son operation ID NPZ metadata'sında da saklanır. Windows'ta file fsync uygulanır, POSIX directory-fsync uygulanmaz; POSIX yolunda directory fsync kodu vardır fakat bu Windows koşusunda doğrulanmadı. Elektrik kesintisi ve tüm dosya sistemleri için dayanıklılık garantisi yoktur.
+
+Servis startup'ında ilk mutable kullanım öncesi index dizinindeki `.writer.lock` için OS lease alınır. Windows byte-range `msvcrt` kilidi; POSIX'te `fcntl.flock` kullanılır. Lockfile'ın varlığı veya PID sahiplik kanıtı değildir; process öldüğünde OS kilidi bırakır. Aynı dizine ikinci servis ilk mutasyondan önce hata verir; farklı dizinler bağımsızdır. Uvicorn `--workers 1` kullanın; aynı index'e ikinci reload/worker eşzamanlı yazıcı olarak başlamaz.
+
+Shutdown yeni model/mutasyon işlerini reddeder; delete dahil başlamış native işler drain edilir. Lifespan/istemci iptali OS lease'i erken bırakmaz: ayrı watcher gerçek işler ve bekleyen ticket'lar bitene kadar kilidi tutar. Drain edilemeyen native iş varsa lease süreç gerçekten bitene kadar tutulabilir; sert thread sonlandırması yoktur. Servis lifespan'ını devre dışı bırakmak desteklenmez. Standalone `VectorStore` constructor'ları lease almaz; read/reload ve in-memory nesneler sahte çakışma yaşamaz. Standalone kalıcı yazıcılar için lease kullanımı çağıranın sorumluluğudur; bu mekanizma kötü niyetli yerel prosese karşı dosya ACL/auth yerine geçmez.
+
+Doğrulanan platform Windows 11 x64 / Python 3.12.10'dur: native FAISS reload, I/O fault matrisi, iki gerçek prosesin OS kilidi, process kill sonrası release ve native iş + client/shutdown iptal testi çalıştırıldı. POSIX/NFS/ağ dosya sistemi ve gerçek power-loss testleri çalıştırılmadı.
+
 ### Embedding ayarlarını değiştirmek
 
-Kayıtlı index, hangi embedding modeli ve ön eklerle oluşturulduğunu saklar. `EMBEDDING_MODEL_NAME`, `EMBEDDING_QUERY_PREFIX` veya `EMBEDDING_PASSAGE_PREFIX` değiştirilirse eski vektörler yeni modelle karşılaştırılamaz; uygulama bu durumda sessizce yanlış sonuç döndürmek yerine açık bir hatayla başlamaz. Eski ayarlara dönün ya da `data/index/store.npz` dosyasını silip dokümanları yeniden yükleyin.
+Kayıtlı index, sürümlü embedding model/revision, aynı artifact tokenizer kimliği, prefix, L2 normalization, beklenen/etkili dimension ve ingestion/chunking kimliğini saklar. Yeni store formatı `2`'dir. `models.lock.json` resmî Hugging Face metadata'sından gözlenen gerçek immutable E5/Qwen commit'lerini, kaynak URL'lerini ve config hash'lerini içerir; uygulama Git commit'i model revision diye kullanılmaz. Default model adları korunur. `EMBEDDING_MODEL_REVISION` ve `LLM_MODEL_REVISION` ayrı 40 karakterlik lowercase SHA ayarlarıdır; custom model deposu için explicit revision gerekir. Tokenizer aynı repository/revision'a sabitlenir; branch/tag pin sayılmaz. Loader ve single-flight cache aynı etkili kimliği kullanır.
+
+`Settings.model_identity()` deterministik model/tokenizer ve index kimliğini, `embedding_signature()` yalnız vektör üretimini etkileyen kimliği verir. `INGESTION_VERSION=1`, varsayılan `CHUNKER_STRATEGY=markdown_v1`, OCR dilleri ve size/overlap imzaya dahildir. `legacy_character` eski deneyler için açıkça seçilebilir. Yalnız LLM revision değişimi embedding index'ini reddetmez. Gerçek embedding adapter'ı model yüklendikten sonra dimension/sequence metadata'sını ve encode çıktısının boyutunu denetler; store ayrıca NPZ dimension metadata'sını matrise karşı kontrol eder. Runtime çıktısı startup'ta ölçülmüş gibi sunulmaz. Manifestteki MIT/Apache-2.0 bilgileri model artifact kartlarına aittir; repository kaynak kodu lisansı seçilmemiştir.
+
+### Eski index'ten açık geçiş ve rollback
+
+Revision'sız/eski format NPZ yeni SHA ile etiketlenmez; dosya değiştirilmeden açık hata verilir. Eski dosyayı silmeyin veya startup rebuild beklemeyin. Servisi durdurun, eski kod/ayarları ve index dizinini yedekleyin; yeni ayrı `INDEX_DIR` ile özgün belgelerden reindex yapın. Windows PowerShell örneği:
+
+```powershell
+# Service stopped; choose new, unused backup/index directory names.
+Copy-Item -LiteralPath data/index -Destination data/index-backup -Recurse
+$env:INDEX_DIR='data/index-v2'
+uvicorn main:app --host 127.0.0.1 --no-proxy-headers
+# Re-upload the originals explicitly, then verify /documents and /health.
+```
+
+Özgün upload dosyaları API işleminden sonra silinir; normalized NPZ chunk'larından kayıpsız PDF/Markdown geri üretimi yapılmaz. Orijinaller yoksa reindex somut olarak engellidir; eski dizini koruyup orijinalleri temin edin. Otomatik uzun süre belge saklama eklenmedi. Rollback için servisi durdurun, eski kod ve eski model/ingestion ayarlarıyla `INDEX_DIR`'i korunmuş eski dizine/backup'a döndürün; v2 dosyasını eski kodun okuyacağını varsaymayın. Yeni dizini eski dosyanın üstüne kopyalamayın. Küçük sentetik vektör/gerçek FAISS migration ve eski T05 okuyucusuyla rollback doğrulandı; gerçek-model/gerçek kullanıcı verisi migration'ı çalıştırılmadı.
 
 ### Soru sorma
 
@@ -150,63 +235,89 @@ Bu uyarılar cevabı engellemez veya yeniden üretmez. `cited=true` yalnız o ka
 
 ## Testler
 
-```bash
-pytest -q
+### Son entegrasyon ve açık gate'ler
+
+Yerel güvenilirlik kontrolleri gerçek FAISS/framework/dosya/proses kilidi ile ve açık fake modellerle çalıştırılır. TXT/MD/küçük PDF upload → list → ask/kaynak/uyarı → duplicate → tek belge delete → restart akışı; erişim/limit/busy/loader/token/precommit ve lease/iptal regresyonları bu lane'dedir. Ölçülmemiş gerçek-model entegrasyonu ve kalite/kapasite gate'i açık kalır; bütün sistem için genel production-ready iddiası yoktur.
+
+Sınırlı yerel kapasite fixture'ı:
+
+```powershell
+python experiments/capacity_check.py --profile experiments/capacity_profiles/local_fixture.json --output capacity-fixture.json
 ```
 
-Testler chunk metadata'sını, embedding/vector retrieval akışını, prompt kısıtlarını, kaynak dönüşünü, yetersiz kanıt davranışını, ayarların environment'tan okunmasını ve API endpoint'lerini (yükleme doğrulaması ve boyut sınırı dahil) kontrol eder. Gerçek embedding modeli veya LLM yüklenmez; bu fonksiyonlar testte sahte fonksiyonlarla değiştirilir, bu yüzden testler birkaç saniyede biter.
+Profil 6 istek, 1 aktif/2 bekleyen iş, 25 ms açık fake iş, 10 saniyelik iş penceresi, 128 bayt upload, 512 MiB proses peak RSS ve 1 MiB sahip olunan index dosyası bütçesi kullanır. Uzak sunucu hedeflemez; gerçek TCP/ağ gecikmesini, soğuk model yüklemesini veya LLM throughput'unu ölçmez. RSS işletim sisteminin proses peak working-set sayacıdır; disk değeri kontrolün kendi index dosyalarıdır. Bütçe kontrolü hard OS memory/CPU termination garantisi değildir. Küçük örneklemde p95 null bırakılır. Parametreler, örnek sayısı ve donanım çıktı JSON'unda yer alır; fake süreler gerçek model gecikmesi sayılmaz.
+
+Cache-only gerçek-model smoke ayrı ve açık opt-in'dir:
+
+```powershell
+$env:EVIDENCERAG_REAL_MODEL_TESTS='1'
+python -m pytest -q -p no:cacheprovider -m real_model tests/test_end_to_end.py
+```
+
+Bu komut iki pinli immutable modelin mevcut cache'ini gerektirir; test offline kalır ve cache yoksa başarı taklidi yapmaz. Bu teslimde ağırlık indirilmedi, gerçek-model smoke/holdout kalite/cold-start/model-RSS çalıştırılmadı. Test için cache doldurma veya yeni kapasite bütçesi ayrıca kararlaştırılmalıdır. Varsayılan E5/Qwen modelleri ve main dalındaki Markdown chunker korunur; structured_v2 yalnız opt-in'dir.
+
+Geri dönüşte servis durdurulur ve kod/ayar/index şeması birlikte seçilir. T06 öncesi v1 NPZ, eski T05 kodu ve eski imza ayarlarıyla kendi değişmemiş yedek dizininden açılır; yeni v2 dosya eski koda zorlanmaz. Structured v2'den legacy'ye dönüş de eski legacy index dizinine açık geçiştir. Özgün belge yoksa kayıpsız reindex varsayılmaz; yedek ve yeni dizinler korunur, kullanıcı dosyası silinmez. Uygulanmamış PR'lar merge edilmeden reddedilebilir; PR/branch kapatmak kullanıcı verisini geri almak için otomatik dosya silme gerekçesi değildir.
+
+```bash
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.lock
+python -m pytest -q -p no:cacheprovider -m "model_free and not real_model"
+python -m pytest -q -p no:cacheprovider -m "native and not real_model"
+python experiments/evaluate.py --preflight-only --output eval-preflight.json
+```
+
+Node 24 PATH üzerinde bulunmalıdır; UI testleri küçük DOM stub'ı çalıştırır, gerçek tarayıcı denetimi değildir. `EVIDENCERAG_NODE_BINARY` açık Node executable seçebilir. `tests/conftest.py` model hub erişimini offline tutar. Model-free lane algoritma/adapter kontrolleri, native lane gerçek FAISS/framework/dosya/proses kilidi ile fake model entegrasyonudur. Toplam kontrol için `python -m pytest -q -p no:cacheprovider -m "not real_model"` kullanılabilir. Gerçek modellerle cache-only lane ancak açık `EVIDENCERAG_REAL_MODEL_TESTS=1` seçimi ve hazır immutable cache ile çalıştırılır; ağırlık indirme ayrı bütçe kararıdır.
+
+Enjekte edilen `generate_answer(..., text_generator=callable)` test protokolü primitive `max_new_tokens`/`do_sample` argümanlarını kullanır ve Transformers/Torch gerektirmez. Üretim yolu gerçek `GenerationConfig`, revision, tokenizer bütçesi ve scheduling davranışını korur; eksik kütüphanede fake başarılı yanıt üretmez. Bu ayrım boş stdlib ortamında ayrıca doğrulanır.
+
+`.github/workflows/tests.yml` aynı kurulum/test/preflight komutlarını Windows/Python 3.12.10/Node 24.19.0 üzerinde çalıştırır; actions checkout/setup-python/setup-node resmi repo tag'lerinden gözlenen immutable SHA'lara bağlıdır. Dataset manifest hash'i UTF-8/LF metnini kullanır; LF ve CRLF checkout'ları aynı kaynak etiketlerini doğrular. Ham corpus dosya hash'leri ayrıca raporlanır. Workflow dosyasının eklenmesi uzak CI başarısı değildir; PR kontrolleri ayrıca doğrulanmalıdır. Lisans seçimi hak sahibini bekler; otomatik LICENSE eklenmez.
+
+Lock güncellemesi için desteklenen temiz Windows/Python ortamında `python -m pip install --dry-run --ignore-installed --only-binary=:all: -r requirements.txt --report runtime-resolver.json` ve dev girdisiyle aynı komut kullanılır. Her raporun `install` kayıtlarındaki gerçek `metadata.name==metadata.version` ve `download_info.archive_info.hashes.sha256` değerlerinden ilgili lock yeniden üretilir; ardından hash zorunlu temiz kurulum, iki test lane'i ve native import kontrolü tekrar yapılır. Resolver raporları ve üretici script bu görevin dış teslim paketinde kayıtlıdır. Sadece sürüm listesini değiştirmek doğrulama sayılmaz.
 
 ## Değerlendirme
 
-`experiments/eval/` altında iki Türkçe değerlendirme seti bulunur:
+### Yapı koruyan chunker (opt-in)
 
-- `dataset.json`: birbirine benzeyen iki belediye raporu ile bir izin yönergesi ve bunlar üzerine 41 soru. Sorular dört gruptadır: cevaplanabilir (Türkçe ve İngilizce), aynı konuda olup cevabı dokümanlarda bulunmayan "tuzak" sorular ve tamamen konu dışı sorular.
-- `dataset_hard.json`: ilk set hit@1 1.00'e ulaştığı için eklenen daha zor set. Kurgusal bir e-belge yönergesi (hata kodu tablosu, birbirine benzeyen iptal/itiraz bölümleri), 20 satırlık bir bayi koşulları tablosu ve yalnızca OCR ile okunabilen taranmış bir PDF (`make_scanned_pdf.py` ile üretilir) içerir; ilk setin dokümanları dikkat dağıtıcı olarak eklenir. Cevaplanabilir sorular, onları zorlaştıran şeye göre etiketlidir: `code`, `table`, `confusable`, `paraphrase`, `prose`, `scanned`.
+Uygulama varsayılanı main dalındaki başlık/tablo davranışını koruyan `CHUNKER_STRATEGY=markdown_v1`, `INGESTION_VERSION=1` olur. Eski `legacy_character` açık seçenek olarak ve fixture çıktıları değiştirilmeden tutulur. Doğrudan `chunk_documents` yardımcı fonksiyonunun geriye uyumlu varsayılanı legacy'dir; pipeline stratejiyi daima açıkça iletir. Yeni kurulum/ayrı reindex için `CHUNKER_STRATEGY=structured_v2`, `INGESTION_VERSION=2` ve yeni bir `INDEX_DIR` birlikte seçilir. Strateji/version/size/overlap T06 index imzasına girer; eski dizini yeni stratejiyle açmak kontrollü uyumsuzluk hatası verir. Yedek + özgün belgelerden yeni dizine reindex + eski kod/ayar/dizine dönüş sözleşmesi geçerlidir; otomatik silme/rebuild yoktur.
+
+Yeni strateji ATX Markdown başlıkları, satır/paragraf, tablo ve liste ilişkilerini bütçe içinde korur. Metadata `heading_path`, `char_start`, `char_end`, `source_sha256`, `strategy`, `ingestion_version`, `normalization_version`, `offset_unit` ve `source_representation` içerir. Span `[start,end)` Unicode karakter aralığıdır: TXT/MD için UTF-8 metnin CRLF/CR → LF temsilinde; PDF için extractor'ın tek sayfa LF metninde. PDF byte offset veya görsel bbox değildir. Başlık yolu metadata'dır; gösterilen chunk kaynak span'ıdır, embedding girdisi aynı metin + mevcut passage prefix'idir. Yeni provenance alanları API kaynaklarında eklemeli bulunur; hash/adapter ayrıntıları UI akışına zorunlu eklenmez.
+
+Karakter bütçesi tokenizer bütçesi değildir; embedding adapter/modelinin kendi token tavanı uygulanabilir. Token sayısı ve truncation'ın kalite etkisi bu fixture koşusunda ölçülmedi. Kaynak span'ı, vektörün bütün karakterleri semantik olarak temsil ettiğini kanıtlamaz.
+
+Standart kelimelerde overlap başlangıcı kelime ortasına düşmez; overlap hedef miktardır ve yapı/kelime sınırında azalabilir. Chunk boyundan uzun boşluksuz öğeler ilerleme garantisi için hard-split edilir ve `hard_split=true` taşır. Whitespace-only parçalar gösterilmez; çok küçük bütçelerde kapsam kaybı ölçümde görünmelidir. Bu hafif ATX tarayıcı tam Markdown/HTML parser'ı veya PDF tablo çözücüsü değildir. Newline koruması semantik doğruluk kanıtı sayılmaz.
+
+`experiments/eval/chunking_ablation_manifest.json` tek değişkeni ve aynı context bütçesini tanımlar. T08 qrel/grup metriği kaynakta geçerli olup kaybolan kanıtı paydadan çıkarmaz. Bu teslimde yalnız fixture karşılaştırması yapılır; gerçek model kalite/token/RSS gate'i `not_evaluated` kalır ve yeni strateji varsayılan yapılmaz.
+
+`experiments/eval/` altında Türkçe bir değerlendirme seti bulunur: birbirine benzeyen iki belediye raporu ile bir izin yönergesi ve bunlar üzerine 41 soru. Sorular dört gruptadır: cevaplanabilir (Türkçe ve İngilizce), aynı konuda olup cevabı dokümanlarda bulunmayan "tuzak" sorular ve tamamen konu dışı sorular.
 
 ```bash
-python experiments/evaluate.py                                          # retrieval ve threshold taraması, ~1 dakika
-python experiments/evaluate.py --dataset experiments/eval/dataset_hard.json
-python experiments/evaluate.py --llm                                    # cevapları da üretip puanlar, CPU'da ~15-20 dakika
+python experiments/evaluate.py --preflight-only  # kaynak/hash/span kontrolü; model yüklemez
+python experiments/evaluate.py                  # gerçek retrieval; cache/bütçe gerekir
+python experiments/evaluate.py --llm            # gerçek generation; ayrıca cache/bütçe gerekir
 ```
 
 Betik uygulamayla aynı ayarları (environment ve `.env`) kullanır; `--threshold` ve `--top-k` ile geçici olarak değiştirilebilir. Ölçülenler:
 
-- **Retrieval:** doğru chunk'ın ilk sırada (hit@1) ve ilk `TOP_K` içinde (hit@k) bulunma oranı, MRR; soru tipine göre ayrıca ve soru başına ortanca arama süresi.
-- **Threshold taraması:** her eşik için korunan cevaplanabilir soru oranı ve elenen konu dışı soru oranı. Önerilen eşik, en düşük ilgili skor ile en yüksek konu dışı skorun ortasıdır.
-- **Cevaplar (`--llm`):** cevaplanabilir sorularda doğru / yanlış / reddedildi; cevaplanamayan sorularda doğru ret / uydurma; doğrulama bulguları ve cevap süresi.
+- **Retrieval:** kaynak düzeyinde geçerli qrel OR/AND grubunun threshold öncesi hit@1, hit@k ve tamamlanma rank'ına göre group MRR değeri. Chunk kapsam kaybı paydadan çıkarılmaz; kaynak/oracle hatası ayrı kalite kapısını düşürür.
+- **Threshold:** yalnız açık kalibrasyon verisinde `--tune` ve önceden tanımlı objective/constraint kullanılır. Eski 41 soru `legacy_regression` olarak korunur; yeni holdout değildir ve otomatik yeni eşik seçmez. Holdout'a kaydedilmiş seçim `--frozen-selection` ile sabit uygulanır.
+- **Cevaplar (`--llm`):** `lexical_match`, ret ve hata; bağımsız kökenli semantik rubric ayrı tutulur. Lexical eşleşme doğru cevap garantisi değildir. Generation süresi T07 invocation bayrağına göre hesaplanır; model retleri ve başlatılmış hatalar da sayılır.
 
-Her çalıştırma `experiments/results/` altına bir JSON raporu yazar (git'e eklenmez). Model, prompt veya eşik değişikliklerinden önce ve sonra çalıştırarak karşılaştırın. Yüklenemeyen dokümanlar (ör. OCR kapalıyken taranmış PDF) atlanır ve rapora yazılır; o dokümana ait sorular bulunamadı sayılır.
-
-Zor sette her geliştirmenin retrieval etkisi (cevaplanabilir 26 soru, CPU):
-
-| Adım | hit@1 | hit@5 | MRR | Arama süresi |
-| --- | --- | --- | --- | --- |
-| Başlangıç | 0.58 | 0.85 | 0.68 | 0.02 sn |
-| + başlık yolu | 0.65 | 0.85 | 0.74 | 0.08 sn |
-| + tablo satırları | 0.81 | 0.89 | 0.84 | 0.04 sn |
-| + BM25 hibrit arama | 0.85 | 0.89 | 0.86 | 0.03 sn |
-| + OCR (varsayılan ayarlar) | 0.92 | 1.00 | 0.96 | 0.02 sn |
-
-`BAAI/bge-reranker-v2-m3` reranker'ı OCR'sız durumda hit@1'i 0.85'ten 0.89'a çıkardı (bulunabilen 23 sorunun hepsi ilk sırada) ama arama süresini soru başına ~5.5 saniyeye çıkardığı için varsayılan olarak kapalıdır.
+Her çalıştırma `experiments/results/` altına şema 2 JSON raporu yazar (git'e eklenmez); `--output` başka yerel hedef seçebilir. Dış dataset/corpus yolları desteklenir. Kaynak/model/prompt/index/split fingerprint'leri ve ham satırlar korunur; uyumsuz girdiler uyarısız birleştirilmez. Özel raporları public CI artifact'ına koymayın. Ayrıntılı şema, offset/context bütçesi ve ablation sözleşmesi: [experiments/eval/README.md](experiments/eval/README.md). Bu teslimde gerçek-model kalite/direnç baseline'ı ölçülmedi; `eval-history/fixture-baseline.json` yalnız sentetik mekanik örnektir.
 
 ## Proje yapısı
 
 ```text
 app/
   rag/
-    chunking.py         # başlık yolu, tablo satırları, chunk'lara bölme
+    chunking.py
     config.py
     document_loader.py
     embedding.py
     generation.py
     grounding.py
-    keyword_index.py    # BM25 kelime araması
-    ocr.py              # taranmış PDF sayfaları için EasyOCR
     pipeline.py
     prompt.py
-    reranking.py        # isteğe bağlı cross-encoder reranker
     retrieval.py
-    vector_store.py     # FAISS + hibrit arama
+    vector_store.py
 data/
   raw/ornek_rapor.md
   index/            # kalıcı index (git'e eklenmez)
@@ -214,8 +325,6 @@ experiments/
   eval/
     corpus/
     dataset.json
-    dataset_hard.json
-    make_scanned_pdf.py
   evaluate.py
   results/          # değerlendirme raporları (git'e eklenmez)
 static/
@@ -229,12 +338,27 @@ requirements.txt
 
 ## Bilinen sınırlamalar
 
-- Index tek proses için tasarlanmıştır; aynı `INDEX_DIR`'i kullanan birden fazla uvicorn worker'ı birbirinin değişikliklerini görmez.
-- Her yükleme ve silmede index dosyanın tamamı yeniden yazılır; bu, birkaç bin dokümana kadar sorun olmaz.
-- Başlık yolu ve tablo satırları yalnızca Markdown'da tanınır. PDF'ten çıkan metin düz olduğu için PDF başlıkları ve tabloları bu iyileştirmelerden yararlanmaz; bunun için Docling gibi yapı çıkaran bir ayrıştırıcı gerekir.
-- Chunk'lama değiştiğinde (bu sürümde başlık yolu ve tablo satırları eklendi) eski kayıtlı index otomatik yenilenmez; yeni davranış için dokümanları silip yeniden yükleyin.
-- OCR çıktısı hatalar içerebilir (ör. `kâğıt` yerine `k~âğıt`); sayılar genelde doğru okunur ama kontrol edilmelidir.
-- Kelime araması kelimelerin ilk beş harfiyle eşleşir; çok kısa kelimeler ve beş harften sonra ayrılan kelimeler için kaba bir yaklaşımdır.
+- Index tek servis yazıcısı içindir; aynı `INDEX_DIR`'e ikinci servis OS lease alamaz. Read/reload nesneleri ayrı sözleşmedir.
+- Her yükleme ve silmede candidate index ve tam NPZ yazımı O(N) iş yapar; bu donanımda kapasite/p95 ölçülmedi.
+- Taranmış PDF OCR'ı isteğe bağlı EasyOCR kurulumunu gerektirir; gerçek OCR kalite/kapasitesi bu incelemede ölçülmedi.
 - Şu anda yalnızca PDF, TXT ve Markdown desteklenir.
 - Cevap doğrulaması atıfları ve sayıları kontrol eder; sayı içermeyen iddiaların kanıta dayanıp dayanmadığını denetlemez.
-- Değerlendirme setleri küçüktür (41 ve 37 soru); bir sorunun sırası değişince skor 0.04 oynar. Sonuçlar yön gösterir, kesin değildir.
+- Değerlendirme seti küçüktür (41 soru, 3 doküman); sonuçlar yön gösterir, kesin değildir.
+
+
+## Hibrit retrieval, reranker ve OCR
+
+Main dalındaki BM25 + FAISS sıralaması korunur (`HYBRID_SEARCH=true`, `RETRIEVAL_CANDIDATES=30`, `KEYWORD_WEIGHT=0.5`). Eşik birleşik sıralama puanına değil cosine skoruna uygulanır. BM25 önbelleği yalnız yayımlanan store değişikliklerinde ve reload sonrası yenilenir; başarısız commit canlı durumu değiştirmez.
+
+Reranker varsayılan olarak kapalıdır. Etkinleştirmek için `RERANKER_MODEL_NAME` ile birlikte `RERANKER_MODEL_REVISION` alanına modelin immutable 40 karakter commit SHA'sını verin. Reranker kimliği diagnostics'e girer; değişiklik ayrı kalite ölçümü gerektirir. OCR ve reranker soğuk yüklemesi single-flight olur.
+
+OCR için `python -m pip install -r requirements-ocr.txt` ayrıca gerekir. Bu opsiyonel bağımlılıklar core Windows hash lock kapsamına dahil değildir. `OCR_LANGUAGES=tr,en` main davranışını korur; boş değer OCR'ı kapatır. EasyOCR ilk gerçek kullanımda kendi ağırlıklarını indirebilir; OCR ağırlıkları immutable model lock kapsamına dahil değildir. OCR ile çıkarılan metne de belge toplam metin/sayfa limitleri uygulanır; extractor/OCR içindeki tepe RAM/CPU için sert proses izolasyonu sağlanmaz.
+
+`dataset_hard.json` korunur. Model indirmeyen preflight, metin katmanı olmayan PDF için etiket uydurmaz: ilgili kaynaklar oracle-invalid kalır ve kapı başarısız olur. Gerçek OCR veya doğrulanmış harici kaynak qrel'leri olmadan bu set tam kalite kabulü vermez. Frozen seçimle değerlendirmede ana metrik yalnız holdout'tan hesaplanır; calibration ve legacy metrikleri `metrics_by_split` altında ayrı kalır.
+
+CI ayrıca bağımlılık tutarlılığını ve ağırlık yüklemeden native import'ları kontrol eder:
+
+```bash
+python -m pip check
+python -c "import torch, faiss, transformers, sentence_transformers"
+```
