@@ -183,7 +183,7 @@ def threshold_sweep(rows,current):
             ("unanswerable_related","related_rejected",False),("unanswerable_offtopic","offtopic_rejected",False)]:
             selected=[r for r in rows if r["category"]==category and not r.get("oracle_invalid")]
             values[key]=share(_threshold_hit(r,threshold) if positive
-                else (r.get("top_score") is None or r["top_score"]<threshold) for r in selected)
+                else (not r.get("error") and (r.get("top_score") is None or r["top_score"]<threshold)) for r in selected)
         sweep.append(values)
     return {"selection":"descriptive_only","recommended_threshold":None,"sweep":sweep}
 

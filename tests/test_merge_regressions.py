@@ -336,3 +336,31 @@ def test_frozen_selection_rejects_failed_wrong_scope_or_synthetic_artifacts(tmp_
     selection.write_text(json.dumps(artifact))
     with pytest.raises(ValueError):
         run_evaluation(path, settings, corpus_root=tmp_path, frozen_selection=selection, preflight_only=True, execution_kind='real_model')
+
+
+@pytest.mark.parametrize('category,key', [('unanswerable_related','related_rejected'), ('unanswerable_offtopic','offtopic_rejected')])
+def test_retrieval_errors_never_receive_rejection_credit(category, key):
+    rows = [{'category':category, 'top_score':None, 'relevant_score':None, 'error':{'type':'RuntimeError'}},
+        {'category':category, 'top_score':None, 'relevant_score':None}]
+    metrics = threshold_sweep(rows, .8)['sweep'][0]
+    assert metrics[key] == .5
+
+
+def test_failed_calibration_run_never_publishes_selected_threshold(tmp_path, monkeypatch):
+    import experiments.eval.runner as runner
+    path = dataset(tmp_path, [{'id':name,'split':'calibration','fact_group':name,'question':'alpha?',
+        'category':'answerable','document':'a.txt','evidence':'alpha','answer':[['alpha']]} for name in ('good','bad')])
+    data = json.loads(path.read_text())
+    data['threshold_objective'] = {'name':'balanced_category_retention_rejection','constraints':{'answerable_kept':1}}
+    path.write_text(json.dumps(data))
+    original = runner._retrieval_row
+    def fail_one(q, *args, **kwargs):
+        if q['id'] == 'bad':
+            raise RuntimeError('synthetic retrieval failure')
+        return original(q, *args, **kwargs)
+    monkeypatch.setattr(runner, '_retrieval_row', fail_one)
+    settings = Settings(relevance_threshold=.1)
+    pipeline = RAGPipeline(settings=settings, embedding_function=embedding, runtime=HeavyRuntime())
+    report = run_evaluation(path, settings, pipeline=pipeline, corpus_root=tmp_path, tune=True, execution_kind='fixture')
+    assert report['status'] == 'failed' and report['selected_threshold'] is None
+    assert report['retrieval']['answerable']['count'] == 2
