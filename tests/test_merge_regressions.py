@@ -247,10 +247,12 @@ def test_capacity_fixture_disables_preload_and_rejects_no_generation(monkeypatch
     monkeypatch.setattr(RAGPipeline, 'preload_models', forbidden)
     if failure:
         monkeypatch.setattr(RAGPipeline, 'find_evidence', lambda *args, **kwargs: [])
-    report = asyncio.run(capacity.exercise(profile))
+    report = asyncio.run(capacity.exercise(profile, **({'clock': lambda: 0.0} if failure else {})))
     assert report['status'] == ('failed' if failure else 'passed')
     assert (report['observed_max_active'] == 0) is failure
     assert (report['completed'] == 0) is failure
+    if failure:
+        assert report['fixture_elapsed_seconds'] == 0 and report['fixture_requests_per_second'] is None
 
 
 def test_hybrid_cache_refreshes_on_add_delete_and_failed_write(tmp_path, monkeypatch):

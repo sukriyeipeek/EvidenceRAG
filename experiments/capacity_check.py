@@ -43,7 +43,7 @@ def validate_profile(profile):
         if type(value) is not int or not low<=value<=high:raise ValueError('Profile value outside bounded range: '+key)
 
 
-async def exercise(profile):
+async def exercise(profile, *, clock=time.perf_counter):
     validate_profile(profile)
     import httpx2
     import numpy as np
@@ -75,18 +75,18 @@ async def exercise(profile):
                 transport=httpx2.ASGITransport(app=main.app,client=('127.0.0.1',1))
                 async with httpx2.AsyncClient(transport=transport,base_url='http://127.0.0.1') as client:
                     payload=b'Fixture event year is 2024. '+b'x'*(profile['payload_bytes']-28)
-                    setup=time.monotonic()
+                    setup=clock()
                     upload=await client.post('/documents',files={'file':('fixture.txt',payload)})
                     if upload.status_code!=200:raise RuntimeError('Synthetic index setup failed')
-                    setup_ms=(time.monotonic()-setup)*1000
+                    setup_ms=(clock()-setup)*1000
                     async def one(index):
-                        started=time.monotonic();response=await client.post('/ask',json={'question':'Fixture event year?'})
+                        started=clock();response=await client.post('/ask',json={'question':'Fixture event year?'})
                         data=response.json()
-                        return {'index':index,'status':response.status_code,'request_ms':(time.monotonic()-started)*1000,
+                        return {'index':index,'status':response.status_code,'request_ms':(clock()-started)*1000,
                             'diagnostics':data.get('diagnostics')}
-                    started=time.monotonic()
+                    started=clock()
                     rows=await asyncio.wait_for(asyncio.gather(*(one(i) for i in range(profile['jobs']))),profile['timeout_seconds'])
-                    elapsed=time.monotonic()-started
+                    elapsed=clock()-started
                     health=(await client.get('/health')).json()
             owned_bytes=sum(p.stat().st_size for p in Path(directory).iterdir() if p.is_file())
         finally:main.rag_pipeline=original
@@ -96,7 +96,7 @@ async def exercise(profile):
         'status':'passed' if within and len(ok)+len(busy)==len(rows) else 'failed','profile':profile,
         'machine':{'platform':platform.platform(),'python':platform.python_version(),'processor':platform.processor(),'logical_cpus':os.cpu_count()},
         'requests':len(rows),'completed':len(ok),'busy_rejected':len(busy),'observed_max_active':high_water,
-        'fixture_elapsed_seconds':elapsed,'fixture_requests_per_second':len(ok)/elapsed,
+        'fixture_elapsed_seconds':elapsed,'fixture_requests_per_second':len(ok)/elapsed if elapsed > 0 else None,
         'fixture_index_setup_ms':setup_ms,'cold_model_load_ms':None,
         'fixture_median_request_ms':statistics.median(r['request_ms'] for r in ok) if ok else None,
         'p95_ms':None,'p95_note':'Small fixture sample; no stable p95 claim',
