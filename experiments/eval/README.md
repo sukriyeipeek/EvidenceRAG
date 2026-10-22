@@ -89,3 +89,7 @@ The hard dataset includes a scanned PDF. Preflight never loads OCR: absent text
 labels remain oracle-invalid and block acceptance. Normal runs can use the optional
 OCR adapter; extracted PDF page spans and independently reviewed OCR labels still
 need explicit review. The presence of PDF/OCR mechanics is not gold-label evidence.
+
+Frozen selection also requires a completed, source-valid tuning report with the
+same execution kind. A synthetic/failed run cannot promote its threshold into a
+real-model run. Failed tuning never publishes a selected threshold.

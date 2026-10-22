@@ -316,3 +316,23 @@ def test_reranker_requires_an_immutable_revision():
 def test_main_markdown_strategy_obeys_small_chunk_budget(size):
     chunks = chunk_documents([page('# Heading\n' + 'abc '*20)], chunk_size=size, chunk_overlap=0, strategy='markdown_v1')
     assert chunks and all(0 < len(c['text']) <= size for c in chunks)
+
+
+@pytest.mark.parametrize('change', [
+    {'status':'failed'}, {'mode':'evaluation'}, {'data_gate':'failed'}, {'execution_kind':'fixture'}, {'selected_threshold':True}
+])
+def test_frozen_selection_rejects_failed_wrong_scope_or_synthetic_artifacts(tmp_path, change):
+    path = dataset(tmp_path, [{'id':'q','split':'calibration','fact_group':'fact','question':'alpha?',
+        'category':'answerable','document':'a.txt','evidence':'alpha','answer':[['alpha']]}])
+    data = json.loads(path.read_text())
+    data['threshold_objective'] = {'name':'balanced_category_retention_rejection','constraints':{'answerable_kept':1}}
+    path.write_text(json.dumps(data))
+    settings = Settings(relevance_threshold=.1)
+    pipeline = RAGPipeline(settings=settings, embedding_function=embedding, runtime=HeavyRuntime())
+    artifact = run_evaluation(path, settings, pipeline=pipeline, corpus_root=tmp_path, tune=True, execution_kind='real_model')
+    assert artifact['status'] == 'completed'
+    artifact.update(change)
+    selection = tmp_path/'selection.json'
+    selection.write_text(json.dumps(artifact))
+    with pytest.raises(ValueError):
+        run_evaluation(path, settings, corpus_root=tmp_path, frozen_selection=selection, preflight_only=True, execution_kind='real_model')

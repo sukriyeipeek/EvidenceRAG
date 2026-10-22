@@ -98,8 +98,12 @@ def run_evaluation(dataset_path,settings=None,*,pipeline=None,llm=False,corpus_r
     tuning_identity={**identity,'settings':{k:v for k,v in identity['settings'].items() if k!='relevance_threshold'}}
     if frozen_selection:
         artifact=json.loads(Path(frozen_selection).read_text())
+        if (artifact.get('mode') != 'tuning' or artifact.get('status') != 'completed'
+                or artifact.get('data_gate') != 'source_labels_valid'
+                or artifact.get('execution_kind') != execution_kind):
+            raise ValueError('Frozen selection requires successful tuning with matching execution kind')
         if artifact['tuning_fingerprint']!=sha(tuning_identity):raise ValueError('Threshold input identity mismatch')
-        if not isinstance(artifact.get('selected_threshold'),(float,int)) or not math.isfinite(artifact['selected_threshold']):raise ValueError('No feasible frozen threshold selection')
+        if type(artifact.get('selected_threshold')) not in (float,int) or not math.isfinite(artifact['selected_threshold']):raise ValueError('No feasible frozen threshold selection')
         settings=dataclasses.replace(settings,relevance_threshold=artifact['selected_threshold']);identity['settings']=dataclasses.asdict(settings)
     report={'schema_version':2,'created_at':datetime.now(timezone.utc).isoformat(),'dataset':str(path),
         'fingerprint':sha(identity),'identity':identity,'tuning_fingerprint':sha(tuning_identity),'execution_kind':execution_kind,
@@ -140,7 +144,10 @@ def run_evaluation(dataset_path,settings=None,*,pipeline=None,llm=False,corpus_r
     report['threshold_sweep']=threshold_sweep([r for r in rows if r.get('split')=='calibration'],settings.relevance_threshold)
     if tune:
         calibration=[r for r in rows if r.get('split')=='calibration' and not r.get('error')]
-        if not calibration:
+        if report['status'] != 'completed':
+            report['selected_threshold'] = None
+            report['tuning_error'] = 'Failed runs cannot select a threshold'
+        elif not calibration:
             report['status']='failed';report['tuning_error']='No calibration rows; legacy data is not silently repurposed'
         else:
             try:report['selected_threshold']=choose_threshold(calibration,settings.relevance_threshold,dataset.get('threshold_objective',{}))
