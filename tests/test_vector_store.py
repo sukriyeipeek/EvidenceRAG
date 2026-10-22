@@ -1,7 +1,23 @@
 import numpy as np
+
+
+def test_structured_strategy_index_identity_rejects_old_directory_without_rewriting(tmp_path):
+    from app.rag.config import Settings
+    from app.rag.vector_store import VectorStore,IncompatibleStoreError
+    import pytest
+    old=Settings();new=Settings(chunker_strategy='structured_v2',ingestion_version=2)
+    assert old.embedding_signature()['ingestion']!=new.embedding_signature()['ingestion']
+    assert old.embedding_signature()['embedding_model_revision']==new.embedding_signature()['embedding_model_revision']
+    path=tmp_path/'store.npz'
+    store=VectorStore(path,old.embedding_signature());store.add([{'text':'old evidence','metadata':{}}],np.ones((1,384),dtype='float32'))
+    before=path.read_bytes()
+    with pytest.raises(IncompatibleStoreError):VectorStore(path,new.embedding_signature())
+    assert path.read_bytes()==before
+    assert len(VectorStore(path,old.embedding_signature()).chunks)==1
 import pytest
 
 from app.rag.vector_store import DuplicateDocumentError, IncompatibleStoreError, VectorStore
+from app.rag.config import InputLimitError
 
 
 SIGNATURE = {"embedding_model_name": "model-a"}
@@ -78,3 +94,205 @@ def test_store_refuses_index_built_with_other_embedding_settings(tmp_path):
 
     with pytest.raises(IncompatibleStoreError, match="model-a"):
         VectorStore(persist_path=path, signature={"embedding_model_name": "model-b"})
+
+
+@pytest.mark.parametrize("count", [1, 2, 3])
+def test_store_chunk_boundary_preserves_disk_on_rejection(tmp_path, count):
+    path = tmp_path / "store.npz"
+    store = VectorStore(persist_path=path, max_chunks=2)
+    args = make_document("d", "h", [[1.0, 0.0]] * count)
+    if count > 2:
+        with pytest.raises(InputLimitError):
+            store.add_document(*args)
+        assert store.chunks == [] and store.list_documents() == []
+        assert not path.exists()
+    else:
+        store.add_document(*args)
+        assert len(VectorStore(persist_path=path).chunks) == count
+
+
+@pytest.mark.parametrize("byte_count", [3, 4, 5])
+def test_store_utf8_text_byte_boundary(tmp_path, byte_count):
+    store = VectorStore(persist_path=tmp_path / "s.npz", max_text_bytes=4)
+    args = make_document("d", "h", [[1.0, 0.0]])
+    args[1][0]["text"] = "ş" + "x" * (byte_count - 2)
+    if byte_count > 4:
+        with pytest.raises(InputLimitError, match="UTF-8"):
+            store.add_document(*args)
+        assert store.is_empty and store.list_documents() == []
+    else:
+        store.add_document(*args)
+        assert len(store.chunks[0]["text"].encode("utf-8")) == byte_count
+
+
+@pytest.mark.parametrize("quota", ["chunks", "text"])
+def test_concurrent_admission_cannot_exceed_store_quota(tmp_path, quota):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    path = tmp_path / "store.npz"
+    store = VectorStore(persist_path=path, max_chunks=1 if quota == "chunks" else 10,
+                        max_text_bytes=1 if quota == "text" else 100)
+    barrier = threading.Barrier(2)
+    def add(i):
+        args = make_document(str(i), str(i), [[1.0, 0.0]])
+        args[1][0]["text"] = "x"
+        store.check_capacity(args[1])  # Both preflight checks pass before final admission.
+        barrier.wait(timeout=5)
+        try:
+            store.add_document(*args)
+            return "added"
+        except InputLimitError:
+            return "rejected"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(add, [1, 2]))
+    assert sorted(outcomes) == ["added", "rejected"]
+    for current in [store, VectorStore(persist_path=path)]:
+        assert len(current.chunks) == len(current.list_documents()) == 1
+        assert current.index.ntotal == 1
+
+
+def test_rejected_add_preserves_existing_disk_and_allows_delete(tmp_path):
+    path = tmp_path / "store.npz"
+    store = VectorStore(persist_path=path, max_chunks=1)
+    store.add_document(*make_document("first", "a", [[1.0, 0.0]]))
+    before = path.read_bytes()
+    with pytest.raises(InputLimitError):
+        store.add_document(*make_document("second", "b", [[0.0, 1.0]]))
+    assert path.read_bytes() == before
+    assert [d["document_id"] for d in store.list_documents()] == ["first"]
+    assert store.delete_document("first")
+    store.add_document(*make_document("second", "b", [[0.0, 1.0]]))
+    assert len(store.chunks) == 1
+
+
+def test_direct_add_also_obeys_quota():
+    store = VectorStore(max_chunks=1)
+    _, chunks, vectors = make_document("d", "h", [[1.0, 0.0], [0.0, 1.0]])
+    with pytest.raises(InputLimitError):
+        store.add(chunks, vectors)
+    assert store.is_empty
+
+
+@pytest.mark.parametrize("operation", ["add","delete"])
+@pytest.mark.parametrize("fault", ["open","serialize","save","file_fsync","replace"])
+def test_precommit_fault_preserves_native_committed_state(tmp_path, monkeypatch, operation, fault):
+    import app.rag.vector_store as module
+    from app.rag.vector_store import StoreWriteError
+    path=tmp_path/"store.npz"
+    store=VectorStore(persist_path=path)
+    store.add_document(*make_document("a","a",[[1.0,0.0]]))
+    store.add_document(*make_document("b","b",[[0.0,1.0]]))
+    before=path.read_bytes(); docs=store.list_documents(); result=store.search([1.0,0.0]); operation_id=store.operation_id
+    def fail(*args,**kwargs): raise OSError("injected precommit failure")
+    with monkeypatch.context() as m:
+        target={"open":(module.tempfile,"NamedTemporaryFile"),"serialize":(module.json,"dumps"),
+                "save":(module.np,"savez"),"file_fsync":(module.os,"fsync"),"replace":(module.os,"replace")}[fault]
+        m.setattr(*target,fail)
+        with pytest.raises(StoreWriteError) as error:
+            if operation=="add": store.add_document(*make_document("c","c",[[1.0,1.0]]))
+            else: store.delete_document("a")
+        assert error.value.commit_status=="not_committed"
+    assert path.read_bytes()==before and store.operation_id==operation_id
+    for current in [store,VectorStore(persist_path=path)]:
+        assert current.list_documents()==docs and current.search([1.0,0.0])==result
+        assert current.find_document_by_hash("a") is not None
+        assert current.find_document_by_hash("c") is None
+    assert list(tmp_path.glob(".store.npz.*.tmp"))==[]
+    # Neither a duplicate trap nor a partially deleted document survives the error.
+    if operation=="add": store.add_document(*make_document("c","c",[[1.0,1.0]]))
+    else: assert store.delete_document("a")
+    assert VectorStore(persist_path=path).list_documents()==store.list_documents()
+
+
+@pytest.mark.parametrize("operation", ["add","delete"])
+def test_postreplace_sync_failure_is_visible_commit_not_rollback(tmp_path,monkeypatch,operation):
+    from app.rag.vector_store import StoreCommitUncertainError
+    path=tmp_path/"store.npz"; store=VectorStore(persist_path=path)
+    store.add_document(*make_document("a","a",[[1.0,0.0]]))
+    store.add_document(*make_document("b","b",[[0.0,1.0]]))
+    before=path.read_bytes()
+    def fail(): raise OSError("injected directory-sync failure")
+    monkeypatch.setattr(store,"_sync_directory",fail)
+    with pytest.raises(StoreCommitUncertainError) as error:
+        if operation=="add": store.add_document(*make_document("c","c",[[1.0,1.0]]))
+        else: store.delete_document("a")
+    assert error.value.commit_status=="durability_uncertain"
+    assert path.read_bytes()!=before
+    loaded=VectorStore(persist_path=path)
+    assert loaded.operation_id==store.operation_id==error.value.operation_id
+    assert loaded.list_documents()==store.list_documents()
+    assert loaded.search([1.0,0.0])==store.search([1.0,0.0])
+    assert len(store.documents)==(3 if operation=="add" else 1)
+    assert list(tmp_path.glob(".store.npz.*.tmp"))==[]
+
+
+def test_unique_candidate_temps_and_standalone_reload_with_lease(tmp_path,monkeypatch):
+    import app.rag.vector_store as module
+    from app.rag.storage_lease import WriterLease
+    path=tmp_path/"store.npz"; names=[]
+    original=module.tempfile.NamedTemporaryFile
+    def temporary(*args,**kwargs):
+        f=original(*args,**kwargs); names.append(f.name); return f
+    monkeypatch.setattr(module.tempfile,"NamedTemporaryFile",temporary)
+    store=VectorStore(persist_path=path)
+    lease=WriterLease(tmp_path).acquire()
+    try:
+        store.add_document(*make_document("a","a",[[1.0,0.0]]))
+        store.add_document(*make_document("b","b",[[0.0,1.0]]))
+        assert VectorStore(persist_path=path).list_documents()==store.list_documents()
+        assert store.delete_document("a")
+        memory=VectorStore(); memory.add_document(*make_document("x","x",[[1.0,0.0]]))
+        assert memory.delete_document("x")
+    finally: lease.release()
+    assert len(names)==len(set(names))==3
+    assert list(tmp_path.glob(".store.npz.*.tmp"))==[]
+
+
+def test_service_write_guard_blocks_before_live_mutation():
+    from app.rag.storage_lease import WriterLeaseError
+    def denied(): raise WriterLeaseError("not started")
+    store=VectorStore(write_guard=denied)
+    with pytest.raises(WriterLeaseError): store.add_document(*make_document("a","a",[[1.0,0.0]]))
+    assert store.index is None and store.documents=={} and store.chunks==[]
+
+
+@pytest.mark.parametrize("change", ["revision","prefix","chunk_size","ingestion"])
+def test_index_identity_changes_reject_without_modifying_file(tmp_path,change):
+    from dataclasses import replace
+    from app.rag.config import Settings
+    settings=Settings();signature=settings.embedding_signature();path=tmp_path/"store.npz"
+    store=VectorStore(persist_path=path,signature=signature)
+    vectors=[[1.0]+[0.0]*383]
+    store.add_document(*make_document("a","a",vectors));before=path.read_bytes()
+    changed={"revision":{"embedding_model_revision":"b"*40},"prefix":{"embedding_query_prefix":"different: "},
+             "chunk_size":{"chunk_size":900},"ingestion":{"ingestion_version":2}}[change]
+    with pytest.raises(IncompatibleStoreError):VectorStore(persist_path=path,signature=replace(settings,**changed).embedding_signature())
+    assert path.read_bytes()==before
+    # LLM-only identity is intentionally absent from the embedding index signature.
+    assert VectorStore(persist_path=path,signature=replace(settings,llm_model_revision="b"*40).embedding_signature()).index.ntotal==1
+
+
+@pytest.mark.parametrize("version", [1,2])
+def test_legacy_unknown_revision_file_is_never_relabelled(tmp_path,version):
+    import json
+    from app.rag.config import Settings
+    path=tmp_path/"old.npz"
+    meta={"version":version,"signature":{"embedding_model_name":"intfloat/multilingual-e5-small"},"documents":[],"chunks":[]}
+    np.savez(path,embeddings=np.empty((0,0),dtype="float32"),meta=np.array(json.dumps(meta)))
+    before=path.read_bytes()
+    with pytest.raises(IncompatibleStoreError):VectorStore(persist_path=path,signature=Settings().embedding_signature())
+    assert path.read_bytes()==before
+
+
+def test_dimension_metadata_mismatch_is_not_silently_loaded(tmp_path):
+    import json
+    path=tmp_path/"store.npz"
+    store=VectorStore(persist_path=path)
+    store.add_document(*make_document("a","a",[[1.0,0.0]]))
+    with np.load(path,allow_pickle=False) as data:
+        vectors=data["embeddings"];meta=json.loads(str(data["meta"]))
+    meta["embedding_dimension"]=99
+    np.savez(path,embeddings=vectors,meta=np.array(json.dumps(meta)))
+    before=path.read_bytes()
+    with pytest.raises(IncompatibleStoreError,match="dimension"):VectorStore(persist_path=path)
+    assert path.read_bytes()==before

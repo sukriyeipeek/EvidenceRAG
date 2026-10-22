@@ -5,12 +5,38 @@ import numpy as np
 import pytest
 
 from app.rag.config import Settings
+from app.rag.config import InputLimitError
 from app.rag.pipeline import INSUFFICIENT_EVIDENCE, RAGPipeline
 from app.rag.vector_store import DuplicateDocumentError
 
 
 def fake_embed(texts, model_name):
     return np.array([[1.0, 0.0] for _ in texts], dtype="float32")
+
+
+@pytest.mark.parametrize('budget',[{'max_document_chunks':1},{'max_text_chars':2}])
+def test_structured_limit_rejection_has_no_embedding_or_partial_store(tmp_path,budget):
+    path=tmp_path/'structure.md';path.write_text('alpha bravo charlie delta echo',encoding='utf-8')
+    calls=[]
+    def embed(*args):calls.append(args);return [[1.,0.]]
+    pipeline=RAGPipeline(settings=Settings(chunker_strategy='structured_v2',ingestion_version=2,chunk_size=8,chunk_overlap=0,**budget),embedding_function=embed)
+    with pytest.raises(InputLimitError):pipeline.index_file(path)
+    assert calls==[] and pipeline.vector_store.is_empty and pipeline.list_documents()==[]
+
+
+def test_structured_embedding_uses_display_span_and_sources_expose_provenance(tmp_path):
+    text='# Başlık\n\nTablo | Tutar\n2025 | 5.800\n\n- İlk öğe\n- İkinci öğe\n'
+    path=tmp_path/'structure.md';path.write_text(text,encoding='utf-8');calls=[]
+    def embed(texts,name):calls.append(list(texts));return np.array([[1.,0.] for _ in texts],dtype='float32')
+    pipeline=RAGPipeline(settings=Settings(chunker_strategy='structured_v2',ingestion_version=2,relevance_threshold=.1),
+        embedding_function=embed,generation_function=lambda *a,**k:'Cevap [Kanıt 1]')
+    pipeline.index_file(path)
+    assert calls[0]==[pipeline.settings.embedding_passage_prefix+c['text'] for c in pipeline.vector_store.chunks]
+    answer=pipeline.ask('Tutar?')
+    for source in answer['sources']:
+        m=source['provenance']
+        assert text[m['char_start']:m['char_end']]==source['text']
+        assert m['strategy']=='structured_v2' and m['heading_path']==['Başlık']
 
 
 def fake_generate(messages, model_name, max_new_tokens):
@@ -55,7 +81,8 @@ def test_pipeline_reports_insufficient_evidence(tmp_path: Path):
 
     result = pipeline.ask("What is unrelated?")
 
-    assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
+    assert result["diagnostics"]["reason"] == "retrieval_no_evidence"
+    assert {k: result[k] for k in ("answer", "sources", "verification")} == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
 
 
 def test_pipeline_applies_embedding_prefixes(tmp_path: Path):
@@ -118,7 +145,8 @@ def test_pipeline_answer_contract(case, monkeypatch):
     pipeline = RAGPipeline(generation_function=lambda *args, **kwargs: case["answer"])
     result = pipeline.ask(case.get("question", "Protokol nedir?"))
     if case["refused"]:
-        assert result == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
+        assert result["diagnostics"]["reason"] == "model_no_evidence"
+        assert {k: result[k] for k in ("answer", "sources", "verification")} == {"answer": INSUFFICIENT_EVIDENCE, "sources": [], "verification": None}
     else:
         assert result["answer"] == case["answer"]  # Preserve whitespace and raw model text.
         assert result["sources"][0]["text"] == evidence[0]["text"]
@@ -150,3 +178,62 @@ def test_pipeline_registers_documents_and_skips_duplicate_uploads(tmp_path: Path
     assert registered["pages"] is None
     assert len(registered["sha256"]) == 64
     assert len(embedded) == 1
+
+
+@pytest.mark.parametrize("kind", ["file", "txt_text", "md_text", "pdf_pages", "chunks", "store_chunks", "store_text"])
+def test_early_budget_rejection_never_embeds_or_mutates(tmp_path, kind):
+    from app.rag.vector_store import VectorStore
+    from pypdf import PdfWriter
+    path = tmp_path / "store.npz"
+    store = VectorStore(persist_path=path)
+    store.add_document({"document_id": "kept", "filename": "kept.txt", "sha256": "kept"},
+                       [{"text": "kept", "metadata": {"document_id": "kept", "chunk_id": "kept-0"}}],
+                       [[1.0, 0.0]])
+    before = path.read_bytes()
+    settings = {"chunk_size": 5, "chunk_overlap": 0}
+    settings.update({
+        "file": {"max_upload_bytes": 3}, "txt_text": {"max_text_chars": 3},
+        "md_text": {"max_text_chars": 3}, "pdf_pages": {"max_pdf_pages": 1},
+        "chunks": {"max_document_chunks": 1}, "store_chunks": {"max_store_chunks": 1},
+        "store_text": {"max_store_text_bytes": 4},
+    }[kind])
+    calls = []
+    rag = RAGPipeline(settings=Settings(**settings), vector_store=store,
+                      embedding_function=lambda *args: calls.append(args))
+    document = tmp_path / ("document.md" if kind == "md_text" else "document.txt")
+    if kind == "pdf_pages":
+        document = tmp_path / "document.pdf"
+        writer = PdfWriter()
+        for _ in range(2):
+            writer.add_blank_page(width=10, height=10)
+        writer.write(document)
+    else:
+        document.write_text("abcdefghij", encoding="utf-8")
+    with pytest.raises(InputLimitError):
+        rag.index_file(document)
+    assert calls == []
+    assert path.read_bytes() == before
+    assert [d["document_id"] for d in store.list_documents()] == ["kept"]
+    assert [c["text"] for c in store.chunks] == ["kept"]
+    assert store.index.ntotal == 1
+
+
+@pytest.mark.parametrize("length", [4, 5, 6])
+def test_direct_question_boundary_precedes_model_calls(tmp_path, length):
+    document = tmp_path / "document.txt"
+    document.write_text("An event happened.", encoding="utf-8")
+    calls = []
+    def embed(texts, model_name):
+        calls.append(texts)
+        return fake_embed(texts, model_name)
+    rag = RAGPipeline(settings=Settings(max_question_chars=5, relevance_threshold=0.3),
+                      embedding_function=embed, generation_function=lambda *args, **kwargs: "Answer")
+    rag.index_file(document)
+    calls.clear()
+    if length > 5:
+        with pytest.raises(InputLimitError, match="Question"):
+            rag.ask("ş" * length)
+        assert calls == []
+    else:
+        assert rag.ask("ş" * length)["answer"] == "Answer"
+        assert len(calls) == 1

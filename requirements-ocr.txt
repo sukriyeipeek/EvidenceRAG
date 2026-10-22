@@ -1,0 +1,2 @@
+# Optional OCR; core runtime remains hash-locked separately.
+easyocr==1.7.2

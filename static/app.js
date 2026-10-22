@@ -182,10 +182,10 @@ async function askQuestion() {
         const data = await parseResponse(response);
 
         if (!response.ok) {
-            throw new Error(data.detail || "Cevap oluşturulamadı.");
+            throw new Error(data.diagnostics?.reason === "busy" ? "Servis meşgul; lütfen daha sonra tekrar dene." : (data.detail || "Cevap oluşturulamadı."));
         }
 
-        renderAnswer(data.answer, data.sources || [], data.verification);
+        renderAnswer(data.answer, data.sources || [], data.verification, data.diagnostics);
     } catch (error) {
         showFeedback(askFeedback, error.message, true);
     } finally {
@@ -209,10 +209,15 @@ async function refreshHealth() {
 
 async function parseResponse(response) {
     const data = await response.json().catch(() => ({}));
+    if (Array.isArray(data.detail)) {
+        data.detail = data.detail.map((item) => item.msg || "Geçersiz istek").join("; ");
+    } else if (data.detail != null && typeof data.detail !== "string") {
+        data.detail = "İstek işlenemedi.";
+    }
     return data;
 }
 
-function renderAnswer(answer, sources, verification) {
+function renderAnswer(answer, sources, verification, diagnostics) {
     answerCard.className = "answer-card answer-ready";
     answerCard.replaceChildren();
 
@@ -223,7 +228,9 @@ function renderAnswer(answer, sources, verification) {
     const content = document.createElement("div");
     const label = document.createElement("p");
     label.className = "answer-label";
-    label.textContent = "Evidence-based answer";
+    label.textContent = diagnostics?.reason === "model_no_evidence" ? "Model yeterli kanıt bulamadı"
+        : diagnostics?.reason === "retrieval_no_evidence" ? "Uygun kaynak bulunamadı"
+        : sources.length ? "Kaynaklar bulundu · uyarılar doğruluk garantisi değildir" : "Yanıt";
     const answerText = document.createElement("div");
     answerText.className = "answer-text";
     answerText.textContent = answer;

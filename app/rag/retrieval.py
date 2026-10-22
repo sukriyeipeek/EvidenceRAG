@@ -19,6 +19,8 @@ def retrieve(
 ):
     if not query or not query.strip():
         raise ValueError("Query cannot be empty")
+    if hasattr(vector_store, "capture_provenance"):
+        vector_store.capture_provenance()
     if vector_store.is_empty:
         return []
 

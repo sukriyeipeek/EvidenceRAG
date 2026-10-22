@@ -1,16 +1,20 @@
 import hashlib
+from functools import partial
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .chunking import chunk_documents
-from .config import Settings
+from .config import InputLimitError, Settings
 from .document_loader import load_document
 from .embedding import embed_texts
 from .generation import generate_answer
 from .grounding import verify_answer
 from .prompt import NO_EVIDENCE_MARKER, build_messages
 from .retrieval import retrieve
+from .reranking import rerank
+from .runtime import get_runtime
 from .vector_store import DuplicateDocumentError, VectorStore
+from .diagnostics import trace_scope, phase, mark_reason, invoke_generator
 
 
 INSUFFICIENT_EVIDENCE = (
@@ -25,13 +29,24 @@ class RAGPipeline:
         embedding_function=embed_texts,
         generation_function=generate_answer,
         vector_store=None,
+        runtime=None,
     ):
         self.settings = settings or Settings()
-        self.embedding_function = embedding_function
-        self.generation_function = generation_function
-        self.vector_store = vector_store or VectorStore()
+        self._default_generation = generation_function is generate_answer
+        self.embedding_function = partial(embed_texts,revision=self.settings.embedding_model_revision) if embedding_function is embed_texts else embedding_function
+        self.generation_function = partial(generate_answer,revision=self.settings.llm_model_revision) if generation_function is generate_answer else generation_function
+        self.runtime = runtime or get_runtime()
+        self.vector_store = vector_store or VectorStore(
+            max_chunks=self.settings.max_store_chunks,
+            max_text_bytes=self.settings.max_store_text_bytes,
+        )
 
     def index_file(self, path, filename=None, source=None):
+        if Path(path).stat().st_size > self.settings.max_upload_bytes:
+            raise InputLimitError(f"File exceeds {self.settings.max_upload_bytes} bytes")
+        return self.runtime.run_sync("index", self._index_file, path, filename, source)
+
+    def _index_file(self, path, filename=None, source=None):
         filename = filename or Path(path).name
         sha256 = _file_sha256(path)
         # Checked before embedding so re-uploads don't pay for it; the store checks
@@ -44,12 +59,21 @@ class RAGPipeline:
             path,
             filename=filename,
             source=source or filename,
-            ocr_languages=[code.strip() for code in self.settings.ocr_languages.split(",") if code.strip()],
+            max_text_chars=self.settings.max_text_chars,
+            max_pdf_pages=self.settings.max_pdf_pages,
+            ocr_languages=[x.strip() for x in self.settings.ocr_languages.split(",") if x.strip()],
         )
         chunks = chunk_documents(
             pages,
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
+            max_chunks=self.settings.max_document_chunks,
+            strategy=self.settings.chunker_strategy,
+            ingestion_version=self.settings.ingestion_version,
+        )
+        self.vector_store.check_capacity(
+            chunks, max_chunks=self.settings.max_store_chunks,
+            max_text_bytes=self.settings.max_store_text_bytes,
         )
         prefix = self.settings.embedding_passage_prefix
         embeddings = self.embedding_function(
@@ -64,7 +88,10 @@ class RAGPipeline:
             "chunks": len(chunks),
             "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        self.vector_store.add_document(document, chunks, embeddings)
+        self.vector_store.add_document(
+            document, chunks, embeddings, max_chunks=self.settings.max_store_chunks,
+            max_text_bytes=self.settings.max_store_text_bytes,
+        )
         return {
             "document_id": document["document_id"],
             "filename": filename,
@@ -77,15 +104,27 @@ class RAGPipeline:
     def delete_document(self, document_id):
         return self.vector_store.delete_document(document_id)
 
+    def ask(self, question):
+        with trace_scope(self.settings, self.vector_store) as trace:
+            if len(question) > self.settings.max_question_chars:
+                mark_reason("input_limit")
+                raise InputLimitError(f"Question exceeds {self.settings.max_question_chars} characters")
+            result = self.runtime.run_sync("ask", self._ask, question)
+            result["diagnostics"] = trace.snapshot()
+            return result
+
     def find_evidence(self, question, relevance_threshold=None):
         if relevance_threshold is None:
             relevance_threshold = self.settings.relevance_threshold
+        def query_embedding(*args, **kwargs):
+            with phase("query_embedding"):
+                return self.embedding_function(*args, **kwargs)
         return retrieve(
             question,
             self.vector_store,
             top_k=self.settings.top_k,
             relevance_threshold=relevance_threshold,
-            embedding_function=self.embedding_function,
+            embedding_function=query_embedding,
             embedding_model_name=self.settings.embedding_model_name,
             query_prefix=self.settings.embedding_query_prefix,
             hybrid=self.settings.hybrid_search,
@@ -93,15 +132,19 @@ class RAGPipeline:
             keyword_weight=self.settings.keyword_weight,
             reranker_model_name=self.settings.reranker_model_name,
             rerank_candidates=self.settings.rerank_candidates,
+            rerank_function=partial(rerank, revision=self.settings.reranker_model_revision),
         )
 
-    def ask(self, question):
-        evidence = self.find_evidence(question)
+    def _ask(self, question):
+        with phase("retrieval"):
+            evidence = self.find_evidence(question)
         if not evidence:
+            mark_reason("retrieval_no_evidence")
             return _insufficient_evidence()
 
         messages = build_messages(question, evidence)
-        answer = self.generation_function(
+        generator = self.generation_function if self._default_generation else partial(invoke_generator, self.generation_function)
+        answer = generator(
             messages,
             model_name=self.settings.llm_model_name,
             max_new_tokens=self.settings.max_new_tokens,
@@ -109,14 +152,23 @@ class RAGPipeline:
         # The model signals unanswerable questions with a marker so the reply does not
         # depend on the model's ability to phrase a refusal in the question's language.
         if answer.strip().casefold() == NO_EVIDENCE_MARKER.casefold():
+            mark_reason("model_no_evidence")
             return _insufficient_evidence()
 
-        verification = verify_answer(answer, evidence, question)
+        with phase("verification"):
+            verification = verify_answer(answer, evidence, question)
+        mark_reason("answered")
         return {
             "answer": answer,
             "sources": _sources_from(evidence, verification["citations"]),
             "verification": verification,
         }
+
+    def preload_models(self):
+        from .embedding import get_embedding_model
+        from .generation import get_text_generator
+        get_embedding_model(self.settings.embedding_model_name,revision=self.settings.embedding_model_revision)
+        get_text_generator(self.settings.llm_model_name,revision=self.settings.llm_model_revision)
 
 
 def _insufficient_evidence():
@@ -135,6 +187,7 @@ def _sources_from(evidence, citations):
             "source": item.get("source"),
             "chunk_id": item.get("chunk_id"),
             "score": item.get("score"),
+            **({"provenance":{key:item.get(key) for key in ("char_start","char_end","source_sha256","source_representation","offset_unit","strategy","ingestion_version","normalization_version","heading_path","hard_split")}} if "char_start" in item else {}),
         }
         for index, item in enumerate(evidence, start=1)
     ]
