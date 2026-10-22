@@ -45,7 +45,7 @@ python -m venv .venv
 python -m pip install --require-hashes --only-binary=:all: -r requirements.lock
 ```
 
-Lock hedefi Windows x64 / CPython 3.12'dir; temiz kurulum Windows 11/Python 3.12.10 üzerinde doğrulanır. Runtime lock 53, test lock 59 çözülmüş dağıtımın gerçek wheel SHA-256 değerlerini taşır. `requirements.txt` runtime doğrudan girdisi, `requirements-dev.txt` ona ek pytest/httpx2 test girdisidir; doğrudan sürümler korunur. Linux/macOS/ARM için bu tek-platform hash dosyaları doğrulanmış kurulum iddiası taşımaz. Kullanılan producer pip 25.0.1'dir; model ağırlıkları lock'a dahil değildir.
+Lock hedefi Windows x64 / CPython 3.12'dir; temiz kurulum Windows 11/Python 3.12.10 üzerinde doğrulanır. Runtime lock 53, test lock 60 çözülmüş dağıtımın gerçek wheel SHA-256 değerlerini taşır. `requirements.txt` runtime doğrudan girdisi, `requirements-dev.txt` ona ek pytest/httpx2 test girdisidir; doğrudan sürümler korunur. Linux/macOS/ARM için bu tek-platform hash dosyaları doğrulanmış kurulum iddiası taşımaz. Kullanılan producer pip 25.0.1'dir; model ağırlıkları lock'a dahil değildir.
 
 İlk gerçek embedding/LLM kullanımı cache yoksa pinli Hugging Face artifact'ını indirebilir; test lane'leri offline'dır ve ağırlık indirmez. Model GPU yoksa CPU float32 kullanır; gerçek inference gecikmesi/kapasitesi bu teslimde ölçülmedi. Model adlarını veya RAG ayarlarını environment variable ile ya da proje kökündeki `.env` dosyasıyla değiştirebilirsiniz (`.env.example` dosyasını kopyalayıp düzenleyin; ortamda zaten tanımlı değerler önceliklidir):
 
