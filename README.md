@@ -306,34 +306,57 @@ Her çalıştırma `experiments/results/` altına şema 2 JSON raporu yazar (git
 ## Proje yapısı
 
 ```text
+main.py                   # FastAPI uygulaması: /health, /documents, /ask
 app/
+  access.py               # yerel erişim sınırı
+  request_limits.py       # istek/girdi bütçeleri
   rag/
-    chunking.py
-    config.py
-    document_loader.py
-    embedding.py
-    generation.py
-    grounding.py
-    pipeline.py
-    prompt.py
-    retrieval.py
-    vector_store.py
+    pipeline.py           # RAGPipeline: indexleme ve soru-cevap akışı
+    config.py             # ortam değişkenlerinden ayarlar
+    document_loader.py    # PDF/TXT/MD metin çıkarma
+    ocr.py                # opsiyonel EasyOCR (taranmış PDF)
+    chunking.py           # overlap'li ve yapı koruyan chunker
+    embedding.py          # E5 embedding (query:/passage:)
+    vector_store.py       # FAISS index + kalıcı NPZ store, candidate commit
+    keyword_index.py      # BM25 anahtar kelime index'i
+    retrieval.py          # hibrit arama ve relevance threshold
+    reranking.py          # opsiyonel reranker
+    prompt.py             # evidence-only prompt
+    generation.py         # yerel instruct LLM
+    grounding.py          # atıf ve sayı doğrulaması
+    diagnostics.py        # yanıt teşhisi (reason, timings_ms, kimlikler)
+    runtime.py            # ağır işler için kuyruk/kapasite, single-flight cache
+    storage_lease.py      # tek yazıcı OS lease'i
 data/
   raw/ornek_rapor.md
-  index/            # kalıcı index (git'e eklenmez)
+  index/                  # kalıcı index (git'e eklenmez)
+docs/
+  PR_REVIEW_2026-10-22.md # entegrasyon incelemesi ve açık gate'ler
 experiments/
+  evaluate.py             # değerlendirme CLI'ı
+  capacity_check.py       # yerel kapasite profili
+  capacity_profiles/
   eval/
+    README.md             # rapor şeması ve metrik sözleşmesi
+    runner.py
+    scoring.py
     corpus/
     dataset.json
-  evaluate.py
-  results/          # değerlendirme raporları (git'e eklenmez)
-static/
-  app.js
-  index.html
-  styles.css
-main.py
-tests/
-requirements.txt
+    dataset_hard.json
+    legacy_manifest.json
+    chunking_ablation_manifest.json
+    rubric_fixtures.json
+    make_scanned_pdf.py
+  results/                # değerlendirme raporları (git'e eklenmez)
+eval-history/
+  fixture-baseline.json   # yalnız sentetik mekanik örnek
+static/                   # basit web arayüzü (index.html, app.js, styles.css)
+tests/                    # pytest testleri ve fixture'lar
+.github/workflows/tests.yml
+models.lock.json          # model revizyon kilitleri
+requirements.txt          # çekirdek bağımlılıklar (+ .lock)
+requirements-dev.txt      # test bağımlılıkları (+ .lock)
+requirements-ocr.txt      # opsiyonel OCR bağımlılıkları
 ```
 
 ## Bilinen sınırlamalar
