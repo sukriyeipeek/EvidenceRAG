@@ -25,8 +25,9 @@ def _create_text_generator(model_name, revision):
 
     # Half-precision weights are several times slower on CPUs without native bf16 support.
     dtype = "auto" if torch.cuda.is_available() else torch.float32
+    extra = {"device": 0} if torch.cuda.is_available() else {}
     tokenizer=AutoTokenizer.from_pretrained(model_name,revision=revision)
-    generator = pipeline("text-generation", model=model_name, tokenizer=tokenizer,dtype=dtype,revision=revision)
+    generator = pipeline("text-generation", model=model_name, tokenizer=tokenizer,dtype=dtype,revision=revision,**extra)
     # Answers should be reproducible, so drop the model's default sampling settings
     # instead of overriding them per call (which makes transformers warn on every request).
     defaults = generator.model.generation_config

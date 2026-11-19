@@ -1,4 +1,4 @@
-from .runtime import SingleFlightCache
+from .runtime import SingleFlightCache, configure_torch_threads
 
 _cache = SingleFlightCache(maxsize=2)
 
@@ -6,10 +6,12 @@ _cache = SingleFlightCache(maxsize=2)
 def get_reranker(model_name, revision=None):
     # Imported lazily for the same reason as in embedding.py: torch is slow to load.
     from sentence_transformers import CrossEncoder
+    import torch
 
     import re
     if not re.fullmatch(r"[0-9a-f]{40}", revision or ""):
         raise ValueError("Reranker requires an immutable revision")
+    configure_torch_threads(torch)
     return _cache.get((model_name, revision), lambda: CrossEncoder(model_name, revision=revision))
 
 
